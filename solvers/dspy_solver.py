@@ -81,11 +81,12 @@ class DSPySolver(BaseSolver):
     - Potential for example optimization (vs naive static examples in FewShotSolver)
     """
     
-    def __init__(self, examples: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, examples: Optional[List[Dict[str, Any]]] = None, use_optimized: bool = True):
         super().__init__()
         self.examples = examples or []
         self.dspy_solver = None
         self.lm = None
+        self.use_optimized = use_optimized
         
     
     def get_similar_examples(self, words: List[str], n: int = 3) -> List[Dict]:
@@ -128,6 +129,81 @@ class DSPySolver(BaseSolver):
         # Filter out exact matches (score = -100) to avoid giving away answers
         return [ex for score, ex in scores[:n] if score > -100]
     
+    def _create_smart_fallback(self, words: List[str]) -> PuzzleSolution:
+        """Create a smarter fallback solution using basic heuristics."""
+        print("Creating smart fallback solution...")
+        
+        # Try some basic groupings based on word patterns
+        groups = []
+        used_words = set()
+        
+        # Group 1: Try to find short words (likely common category)
+        short_words = [w for w in words if len(w) <= 4 and w.lower() not in used_words]
+        if len(short_words) >= 4:
+            group1 = short_words[:4]
+            used_words.update(w.lower() for w in group1)
+            groups.append(GroupSolution(words=group1, reason="Short words"))
+        
+        # Group 2: Try to find capitalized words (likely proper nouns)
+        remaining = [w for w in words if w.lower() not in used_words]
+        cap_words = [w for w in remaining if w[0].isupper() and len(w) > 1]
+        if len(cap_words) >= 4:
+            group2 = cap_words[:4]
+            used_words.update(w.lower() for w in group2)
+            groups.append(GroupSolution(words=group2, reason="Capitalized words"))
+        
+        # Group 3: Try to find words with similar lengths
+        remaining = [w for w in words if w.lower() not in used_words]
+        if remaining:
+            # Group by length
+            by_length = {}
+            for w in remaining:
+                length = len(w)
+                if length not in by_length:
+                    by_length[length] = []
+                by_length[length].append(w)
+            
+            # Find the length with most words
+            best_length = max(by_length.keys(), key=lambda l: len(by_length[l]))
+            if len(by_length[best_length]) >= 4:
+                group3 = by_length[best_length][:4]
+                used_words.update(w.lower() for w in group3)
+                groups.append(GroupSolution(words=group3, reason=f"Words of length {best_length}"))
+        
+        # Fill remaining groups with leftover words
+        remaining = [w for w in words if w.lower() not in used_words]
+        group_num = len(groups) + 1
+        
+        while len(groups) < 4 and remaining:
+            group_size = min(4, len(remaining))
+            if len(remaining) > 4 and len(groups) == 2:
+                # Split remaining words as evenly as possible between last 2 groups
+                mid = len(remaining) // 2
+                group_words = remaining[:mid] if len(remaining) - mid >= 4 else remaining[:4]
+            else:
+                group_words = remaining[:group_size]
+            
+            groups.append(GroupSolution(
+                words=group_words, 
+                reason=f"Fallback group {group_num}"
+            ))
+            
+            used_words.update(w.lower() for w in group_words)
+            remaining = [w for w in remaining if w.lower() not in used_words]
+            group_num += 1
+        
+        # If we don't have exactly 4 groups, fall back to simple split
+        if len(groups) != 4:
+            print("Smart fallback failed, using simple split")
+            groups = [
+                GroupSolution(words=list(words[:4]), reason="fallback group 1"),
+                GroupSolution(words=list(words[4:8]), reason="fallback group 2"),
+                GroupSolution(words=list(words[8:12]), reason="fallback group 3"),
+                GroupSolution(words=list(words[12:16]), reason="fallback group 4")
+            ]
+        
+        return PuzzleSolution(groups=groups)
+
     def format_dspy_example(self, example: Dict) -> dspy.Example:
         """Format an example for DSPy."""
         words_str = ", ".join(example['words'])
@@ -182,7 +258,7 @@ class DSPySolver(BaseSolver):
         """Format user message (not used directly in DSPy but kept for compatibility)."""
         return ", ".join(words)
     
-    def solve(self, words: List[str], use_api: bool = False, model: str = "gpt-4o-mini") -> PuzzleSolution:
+    def solve(self, words: List[str], use_api: bool = False, model: str = "gpt-5-mini") -> PuzzleSolution:
         """
         Solve using DSPy with few-shot examples and chain of thought.
         
@@ -216,19 +292,75 @@ class DSPySolver(BaseSolver):
                 )
                 dspy.settings.configure(lm=self.lm)
             
-            # Use provided examples
-            if self.examples:
-                print(f"Using {len(self.examples)} training examples")
-            
             # Initialize solver if needed
             if not self.dspy_solver:
-                self.dspy_solver = ConnectionsSolver()
+                # Try model-specific optimization file first, then generic
+                model_suffix = model.replace("-", "_")
+                optimized_files = [
+                    f'optimized_solver_{model_suffix}.json',
+                    'optimized_solver.json'
+                ]
+                
+                loaded_optimization = False
+                for opt_file in optimized_files:
+                    if self.use_optimized and os.path.exists(opt_file):
+                        # Load the MIPRO-optimized module
+                        print(f"Loading MIPRO-optimized solver configuration from {opt_file}...")
+                        self.dspy_solver = dspy.Module()
+                        self.dspy_solver.load(opt_file)
+                        loaded_optimization = True
+                        
+                        # If the loaded module doesn't have a generate method, wrap it
+                        if not hasattr(self.dspy_solver, 'generate'):
+                            # Create a ChainOfThought with the optimized signature
+                            with open(opt_file, 'r') as f:
+                                config = json.load(f)
+                        
+                            # The optimized config contains the signature and demos
+                            if 'generate.predict' in config:
+                                opt_config = config['generate.predict']
+                                
+                                # Create a custom signature with optimized instructions
+                                class OptimizedConnectionsSignature(dspy.Signature):
+                                    __doc__ = opt_config['signature']['instructions']
+                                    
+                                    words = dspy.InputField(desc="16 words to group into 4 categories")
+                                    reasoning = dspy.OutputField(desc="Step-by-step reasoning exploring different grouping strategies")
+                                    group1_words = dspy.OutputField(desc="First group of exactly 4 words (comma-separated)")
+                                    group1_reason = dspy.OutputField(desc="Connecting theme for group 1")
+                                    group2_words = dspy.OutputField(desc="Second group of exactly 4 words (comma-separated)")
+                                    group2_reason = dspy.OutputField(desc="Connecting theme for group 2")
+                                    group3_words = dspy.OutputField(desc="Third group of exactly 4 words (comma-separated)")
+                                    group3_reason = dspy.OutputField(desc="Connecting theme for group 3")
+                                    group4_words = dspy.OutputField(desc="Fourth group of exactly 4 words (comma-separated)")
+                                    group4_reason = dspy.OutputField(desc="Connecting theme for group 4")
+                                
+                                # Create a solver with the optimized signature
+                                solver = ConnectionsSolver()
+                                solver.generate = dspy.ChainOfThought(OptimizedConnectionsSignature)
+                                
+                                # Apply any optimized demos if they exist
+                                if 'demos' in opt_config and opt_config['demos']:
+                                    solver.generate.demos = opt_config['demos']
+                                
+                                self.dspy_solver = solver
+                            else:
+                                # Fallback to standard solver
+                                print("Warning: Optimized config format not recognized, using standard solver")
+                                self.dspy_solver = ConnectionsSolver()
+                        break  # Successfully loaded optimization
+                
+                # If no optimization was loaded, use standard solver
+                if not loaded_optimization:
+                    self.dspy_solver = ConnectionsSolver()
             
             # Get similar examples for few-shot learning
             if self.examples:
                 similar = self.get_similar_examples(words, n=3)
                 if similar:
-                    print(f"Using {len(similar)} similar examples for few-shot context")
+                    # We actually only use 2 examples to avoid context length issues
+                    examples_used = min(2, len(similar))
+                    print(f"Selected {examples_used} relevant examples from {len(self.examples)} available training examples")
                     
                     # Format examples for few-shot prompting
                     formatted_examples = []
@@ -250,10 +382,11 @@ class DSPySolver(BaseSolver):
                 
                 for attempt in range(max_retries):
                     try:
+                        # Store original demos before any modifications
+                        original_demos = getattr(self.dspy_solver.generate, 'demos', None)
+                        
                         # Add retry feedback if we had validation issues
                         if attempt > 0 and validation_issues:
-                            # Temporarily modify the prompt with feedback
-                            original_demos = self.dspy_solver.generate.demos
                             retry_feedback = dspy.Example(
                                 words=words_str,
                                 reasoning=f"IMPORTANT: Previous attempt had issues: {', '.join(validation_issues)}. Ensure each group has EXACTLY 4 words and all 16 words are used exactly once.",
@@ -271,24 +404,44 @@ class DSPySolver(BaseSolver):
                         # Validate the prediction
                         validation_issues = []
                         all_words_used = []
+                        input_words_set = set(w.lower().strip() for w in words)
                         
                         for i in range(1, 5):
                             group_words = getattr(pred, f"group{i}_words", "")
-                            words_list = [w.strip() for w in group_words.split(",") if w.strip()]
+                            # More robust word parsing - handle different separators and case
+                            words_list = []
+                            for w in group_words.replace(';', ',').replace('|', ',').split(","):
+                                w = w.strip().lower()
+                                if w:
+                                    words_list.append(w)
                             
                             if len(words_list) != 4:
                                 validation_issues.append(f"Group {i} has {len(words_list)} words instead of 4")
+                            
+                            # Check if words are from the original input
+                            for word in words_list:
+                                if word not in input_words_set:
+                                    validation_issues.append(f"Group {i} contains '{word}' which is not in the input")
                             
                             all_words_used.extend(words_list)
                         
                         # Check for duplicates
                         if len(all_words_used) != len(set(all_words_used)):
-                            duplicates = [w for w in set(all_words_used) if all_words_used.count(w) > 1]
+                            duplicates = [w for w in all_words_used if all_words_used.count(w) > 1]
                             validation_issues.append(f"Duplicate words: {duplicates}")
                         
-                        # Check if all 16 words are used
-                        if len(set(all_words_used)) != 16:
-                            validation_issues.append(f"Used {len(set(all_words_used))}/16 unique words")
+                        # Check if all 16 words are used exactly once
+                        used_set = set(all_words_used)
+                        if used_set != input_words_set:
+                            missing = input_words_set - used_set
+                            extra = used_set - input_words_set
+                            if missing:
+                                validation_issues.append(f"Missing words: {list(missing)}")
+                            if extra:
+                                validation_issues.append(f"Extra words: {list(extra)}")
+                        
+                        if len(all_words_used) != 16:
+                            validation_issues.append(f"Used {len(all_words_used)} total words instead of 16")
                         
                         if not validation_issues or attempt == max_retries - 1:
                             best_pred = pred
@@ -307,34 +460,85 @@ class DSPySolver(BaseSolver):
                     finally:
                         # Restore original demos if we modified them
                         if attempt > 0 and validation_issues:
-                            self.dspy_solver.generate.demos = original_demos
+                            if original_demos is not None:
+                                self.dspy_solver.generate.demos = original_demos
+                            else:
+                                # Clear demos if there were none originally
+                                if hasattr(self.dspy_solver.generate, 'demos'):
+                                    self.dspy_solver.generate.demos = None
                 
                 pred = best_pred
                 
+                # Track API costs from DSPy
+                if hasattr(self.lm, '_total_cost') and self.lm._total_cost > 0:
+                    # DSPy tracks costs internally, log it
+                    self.log_api_cost(model, 0, 0, self.lm._total_cost)
+                    print(f"DSPy API cost: ${self.lm._total_cost:.4f}")
+                elif hasattr(self.lm, 'history') and self.lm.history:
+                    # Calculate cost from history
+                    total_cost = 0
+                    total_prompt_tokens = 0
+                    total_completion_tokens = 0
+                    
+                    for entry in self.lm.history:
+                        if hasattr(entry, 'usage') and entry.usage:
+                            prompt_tokens = entry.usage.prompt_tokens
+                            completion_tokens = entry.usage.completion_tokens
+                            total_prompt_tokens += prompt_tokens
+                            total_completion_tokens += completion_tokens
+                            
+                            pricing = self.MODEL_PRICING.get(model, self.MODEL_PRICING["gpt-5-mini"])
+                            cost = (prompt_tokens / 1_000_000) * pricing["input"] + (completion_tokens / 1_000_000) * pricing["output"]
+                            total_cost += cost
+                    
+                    if total_cost > 0:
+                        self.log_api_cost(model, total_prompt_tokens, total_completion_tokens, total_cost)
+                        print(f"DSPy API cost: ${total_cost:.4f}")
+                
                 # Parse the DSPy output into our PuzzleSolution format
                 groups = []
+                all_used_words = set()
+                input_words_lower = {w.lower(): w for w in words}  # map lowercase to original case
+                
                 for i in range(1, 5):
                     group_words = getattr(pred, f"group{i}_words", "")
                     group_reason = getattr(pred, f"group{i}_reason", "")
                     
-                    # Clean and parse words
-                    words_list = [w.strip() for w in group_words.split(",")]
+                    # Clean and parse words with robust handling
+                    words_list = []
+                    for w in group_words.replace(';', ',').replace('|', ',').split(","):
+                        w = w.strip()
+                        if w:
+                            # Try to match original word case
+                            w_lower = w.lower()
+                            if w_lower in input_words_lower:
+                                words_list.append(input_words_lower[w_lower])
+                            else:
+                                # If we can't match, keep the original
+                                words_list.append(w)
+                    
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    unique_words = []
+                    for w in words_list:
+                        w_lower = w.lower()
+                        if w_lower not in seen and w_lower not in all_used_words:
+                            unique_words.append(w)
+                            seen.add(w_lower)
+                            all_used_words.add(w_lower)
                     
                     # Ensure we have exactly 4 words
-                    if len(words_list) > 4:
-                        words_list = words_list[:4]
-                    elif len(words_list) < 4:
-                        # Try to fill with remaining words not used yet
-                        used_words = set()
-                        for j in range(1, i):
-                            prev_words = getattr(pred, f"group{j}_words", "")
-                            used_words.update(w.strip() for w in prev_words.split(","))
-                        
-                        remaining = [w for w in words if w not in used_words]
-                        words_list.extend(remaining[:4-len(words_list)])
+                    if len(unique_words) > 4:
+                        unique_words = unique_words[:4]
+                    elif len(unique_words) < 4:
+                        # Fill with remaining unused words
+                        remaining = [w for w in words if w.lower() not in all_used_words]
+                        needed = 4 - len(unique_words)
+                        unique_words.extend(remaining[:needed])
+                        all_used_words.update(w.lower() for w in remaining[:needed])
                     
                     groups.append(GroupSolution(
-                        words=words_list,
+                        words=unique_words,
                         reason=group_reason or f"Group {i}"
                     ))
                 
@@ -349,15 +553,8 @@ class DSPySolver(BaseSolver):
                 
             except Exception as e:
                 print(f"DSPy solving failed: {e}")
-                # Fallback to a simple solution
-                solution = PuzzleSolution(
-                    groups=[
-                        GroupSolution(words=list(words[:4]), reason="fallback group 1"),
-                        GroupSolution(words=list(words[4:8]), reason="fallback group 2"),
-                        GroupSolution(words=list(words[8:12]), reason="fallback group 3"),
-                        GroupSolution(words=list(words[12:16]), reason="fallback group 4")
-                    ]
-                )
+                # Better fallback: try some basic grouping heuristics
+                solution = self._create_smart_fallback(words)
             
             return solution
             

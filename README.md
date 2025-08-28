@@ -43,10 +43,15 @@ The solver enforces strict puzzle constraints using Pydantic models with custom 
 - **All 16 words used once** - no duplicates, no omissions
 - **Reasoning required** for each grouping
 
-The system prompt in baseline.py to explicitly states the critical rules. However, they aren't always met. When validation fails, we have a mechanism in place to retry up to 3 times with specific feedback about what went wrong. For example, if the LLM uses a word twice, it gets told: "You included the same word in multiple groups. Each word must appear in EXACTLY ONE group."
-- Note: only retries on validation errors which we have written Pydantic rules for, not other types of errors
+### Retry Strategy by Solver
 
-The key insight is that Pydantic/OpenAI structured outputs guarantee valid JSON structure but not our custom business rules. When validation fails, we now catch the specific error and give the LLM targeted feedback about what went wrong, increasing the chance it will fix the issue on retry.
+- **BaselineSolver & FewShotSolver**: Use the inherited BaseSolver retry logic with OpenAI structured outputs - up to 3 retries with customized error messages for specific validation failures
+- **DSPySolver**: Custom retry logic that adds validation feedback to DSPy demos, adjusting temperature between attempts for variety
+- **MultiStageSolver**: Retries only the refinement stage (up to 3 times) since the validation→refinement pipeline should handle most issues
+- **HungarianSolver**: No retry needed - deterministic algorithm that always produces valid 4x4 partitions
+- **ConstraintSolver**: No retry needed - generates many overlapping candidates then uses constraint solving to find the best valid partition
+
+The key insight is that different solver architectures require different retry approaches: structured output solvers benefit from Pydantic validation retries, DSPy solvers need custom feedback mechanisms, and algorithmic solvers (Hungarian, constraint) guarantee valid outputs by design.
 
 
 ## Validation Metrics

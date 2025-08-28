@@ -11,6 +11,7 @@ class BaseSolver(ABC):
     
     # Model pricing as of 2025 (per 1M tokens)
     MODEL_PRICING = {
+        "gpt-5-mini": {"input": 0.250, "output": 2.00},  # Latest mini model as of Aug 2025
         "gpt-4o-mini": {"input": 0.150, "output": 0.600},
         "gpt-4o": {"input": 3.00, "output": 10.00},
         "gpt-4-turbo": {"input": 10.00, "output": 30.00},

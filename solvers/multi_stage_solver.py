@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Dict, Any, Optional
 import dspy
 from .base import BaseSolver
@@ -343,6 +344,32 @@ class MultiStageSolver(BaseSolver):
                         best_solution = final_solution
                 
                 pred = best_solution
+                
+                # Track API costs from DSPy multi-stage pipeline
+                if hasattr(self.lm, '_total_cost') and self.lm._total_cost > 0:
+                    # DSPy tracks costs internally, log it
+                    self.log_api_cost(model, 0, 0, self.lm._total_cost)
+                    print(f"Multi-stage DSPy API cost: ${self.lm._total_cost:.4f}")
+                elif hasattr(self.lm, 'history') and self.lm.history:
+                    # Calculate cost from history
+                    total_cost = 0
+                    total_prompt_tokens = 0
+                    total_completion_tokens = 0
+                    
+                    for entry in self.lm.history:
+                        if hasattr(entry, 'usage') and entry.usage:
+                            prompt_tokens = entry.usage.prompt_tokens
+                            completion_tokens = entry.usage.completion_tokens
+                            total_prompt_tokens += prompt_tokens
+                            total_completion_tokens += completion_tokens
+                            
+                            pricing = self.MODEL_PRICING.get(model, self.MODEL_PRICING["gpt-4o-mini"])
+                            cost = (prompt_tokens / 1_000_000) * pricing["input"] + (completion_tokens / 1_000_000) * pricing["output"]
+                            total_cost += cost
+                    
+                    if total_cost > 0:
+                        self.log_api_cost(model, total_prompt_tokens, total_completion_tokens, total_cost)
+                        print(f"Multi-stage DSPy API cost: ${total_cost:.4f}")
                 
                 # Parse the final refined output
                 groups = []

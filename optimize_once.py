@@ -103,11 +103,16 @@ def load_examples(filepath: str = "examples.jsonl") -> List[dspy.Example]:
     return examples
 
 
-def run_optimization():
-    """Run MIPRO optimization and save results."""
+def run_optimization(model: str = "gpt-5-mini"):
+    """Run MIPRO optimization and save results.
+    
+    Args:
+        model: The OpenAI model to optimize for (default: gpt-5-mini)
+    """
     
     print("="*80)
     print("MIPRO Optimization for DSPy Connections Solver")
+    print(f"Optimizing for model: {model}")
     print("="*80)
     
     # Load examples
@@ -131,12 +136,23 @@ def run_optimization():
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable not set")
     
-    lm = dspy.LM(
-        model="gpt-4o-mini",
-        api_key=api_key,
-        max_tokens=800,
-        temperature=0.7
-    )
+    # Check if this is a GPT-5 reasoning model
+    if 'gpt-5' in model.lower():
+        # GPT-5 models require specific parameters
+        lm = dspy.LM(
+            model=model,
+            api_key=api_key,
+            max_tokens=20000,  # Required minimum for GPT-5
+            temperature=1.0     # Required temperature for GPT-5
+        )
+    else:
+        # Regular models use standard parameters
+        lm = dspy.LM(
+            model=model,
+            api_key=api_key,
+            max_tokens=800,
+            temperature=0.7
+        )
     dspy.settings.configure(lm=lm)
     
     # Create base solver
@@ -214,9 +230,13 @@ def run_optimization():
     # Save optimization results
     print("\n9. Saving optimization artifacts...")
     
+    # Create model-specific filename
+    model_suffix = model.replace("-", "_")
+    solver_filename = f"optimized_solver_{model_suffix}.json"
+    
     # Save the optimized solver
-    optimized_solver.save("optimized_solver.json")
-    print("   ✓ Saved optimized solver to optimized_solver.json")
+    optimized_solver.save(solver_filename)
+    print(f"   ✓ Saved optimized solver to {solver_filename}")
     
     # Extract and save the optimized signature
     if hasattr(optimized_solver.generate, 'signature'):
@@ -229,15 +249,17 @@ def run_optimization():
             if hasattr(field, 'json_schema_extra'):
                 optimized_fields[field_name] = field.json_schema_extra.get('desc', '')
         
-        with open('optimized_prompts.json', 'w') as f:
+        prompts_filename = f"optimized_prompts_{model_suffix}.json"
+        with open(prompts_filename, 'w') as f:
             json.dump({
+                'model': model,
                 'field_descriptions': optimized_fields,
                 'baseline_score': baseline_avg,
                 'optimized_score': opt_avg,
                 'improvement': opt_avg - baseline_avg
             }, f, indent=2)
         
-        print("   ✓ Saved optimized prompts to optimized_prompts.json")
+        print(f"   ✓ Saved optimized prompts to {prompts_filename}")
     
     # Save the demos if any were selected
     if hasattr(optimized_solver.generate, 'demos') and optimized_solver.generate.demos:
@@ -251,18 +273,19 @@ def run_optimization():
                     demo_dict[field] = getattr(demo, field)
             demos_data.append(demo_dict)
         
-        with open('optimized_demos.json', 'w') as f:
+        demos_filename = f"optimized_demos_{model_suffix}.json"
+        with open(demos_filename, 'w') as f:
             json.dump(demos_data, f, indent=2)
         
-        print(f"   ✓ Saved {len(demos_data)} optimized demos to optimized_demos.json")
+        print(f"   ✓ Saved {len(demos_data)} optimized demos to {demos_filename}")
     
     print("\n" + "="*80)
     print("Optimization Complete!")
     print("="*80)
-    print("\nYou can now use these optimized components in ALL your DSPy solvers:")
-    print("1. optimized_solver.json - Complete optimized solver")
-    print("2. optimized_prompts.json - Optimized field descriptions")
-    print("3. optimized_demos.json - Best few-shot examples")
+    print(f"\nOptimized components saved for model {model}:")
+    print(f"1. {solver_filename} - Complete optimized solver")
+    print(f"2. {prompts_filename} - Optimized field descriptions (if extracted)")
+    print(f"3. {demos_filename} - Best few-shot examples (if selected)")
     print("\nSee apply_optimization.py for how to use these in your solvers.")
     
     return optimized_solver
@@ -376,8 +399,17 @@ if __name__ == "__main__":
 
 
 if __name__ == "__main__":
-    # Run the optimization
-    optimized_solver = run_optimization()
+    import argparse
+    
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Optimize DSPy solver using MIPRO")
+    parser.add_argument("--model", type=str, default="gpt-5-mini",
+                        choices=["gpt-5-mini", "gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+                        help="OpenAI model to optimize for (default: gpt-5-mini)")
+    args = parser.parse_args()
+    
+    # Run the optimization for the specified model
+    optimized_solver = run_optimization(model=args.model)
     
     # Create application script
     create_application_script()
