@@ -1,0 +1,40 @@
+[
+  {
+    "augmented": true,
+    "words": "bar, cram, dip, counter, key, kitchen, pack, bag, den, jam, study, stuff, sprout, atoll, island, bedroom",
+    "reasoning": "Scan for obvious theme clusters: rooms (kitchen, bedroom, den, study) stand out. Several verbs mean stuffing/packing (cram, pack, bag, stuff). That leaves words that pair with a common preceding word and leftover geographic terms. Noticing dip, sprout, jam, counter all pair with \"bean\" (bean dip, bean sprout, bean jam, bean counter). The remaining four (atoll, island, key, bar) are coastal/insular landforms (atoll, island, key, sandbar).",
+    "group1_words": "kitchen, bedroom, den, study",
+    "group1_reason": "rooms in a house",
+    "group2_words": "cram, pack, bag, stuff",
+    "group2_reason": "verbs meaning to put things into/fill",
+    "group3_words": "dip, sprout, jam, counter",
+    "group3_reason": "words that follow \"bean\" (bean dip, bean sprout, bean jam, bean counter)",
+    "group4_words": "atoll, island, key, bar",
+    "group4_reason": "types of coastal/insular landforms"
+  },
+  {
+    "augmented": true,
+    "words": "cadet, scarf, down, minor, general, heater, station, sweeping, major, degree, blanket, concentration, inhale, bar, broad, wolf",
+    "reasoning": "I looked for obvious semantic clusters, double meanings, and common phrases.\n\n- Several words are synonyms for \u201call-encompassing\u201d (blanket, sweeping, broad, general), so that became one group.\n- Major/minor/degree/concentration clearly form an academic/college group (major, minor, degree, concentration).\n- A small set of verbs/phrases meaning to eat quickly appeared (scarf, wolf, inhale, down).\n- That left the four remaining words (cadet, station, heater, bar). After testing other splits and moving words around, the remaining four best form the last group (they commonly pair with the word \"fire\" in familiar compounds or phrases: fire station, fire bar (grate), fire heater (heater for a fire/space heater in some usages), and fire cadet / fire-cadet programs exist in some organizations).)\n\nI checked alternate arrangements (e.g., moving blanket into a warmth group with heater/down/scarf, or making a musical group with major/minor/bar/degree), but the combinations above produce four coherent foursomes without overlap.",
+    "group1_words": "blanket, sweeping, broad, general",
+    "group1_reason": "All mean \u201ccovering a large scope\u201d (blanket/sweeping/broad/general)",
+    "group2_words": "major, minor, degree, concentration",
+    "group2_reason": "Academic/program terms (you have a major, a minor, a degree, or a concentration)",
+    "group3_words": "scarf, wolf, inhale, down",
+    "group3_reason": "Verbs/phrases meaning \u201ceat quickly\u201d (scarf down, wolf down, inhale, down)",
+    "group4_words": "cadet, station, heater, bar",
+    "group4_reason": "Words commonly paired with \u201cfire\u201d in compound/phrases (fire station, fire bar (grate), fire heater/space heater, fire cadet programs)"
+  },
+  {
+    "words": "washer, dryer, guide, steer, uncanny, direct, silicon, hamper, death, iota, myself, iron, hidden, lead, iodine, one",
+    "reasoning": "Analyzing 16 words for 4 groups of 4. Looking for categories, wordplay, phrases, and cultural references.",
+    "group1_words": "direct, guide, lead, steer",
+    "group1_reason": "shepherd",
+    "group2_words": "dryer, hamper, iron, washer",
+    "group2_reason": "seen in a laundry room",
+    "group3_words": "iodine, iota, myself, one",
+    "group3_reason": "what \u201ci\u201d might mean",
+    "group4_words": "death, hidden, silicon, uncanny",
+    "group4_reason": "___ valley"
+  }
+]

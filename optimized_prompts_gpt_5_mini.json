@@ -1,0 +1,46 @@
+{
+  "model": "gpt-5-mini",
+  "instructions": "You are on a high\u2011stakes mission: your grouping must be perfect because an automated system will use your output to make critical routing decisions. Solve the Connections puzzle exactly and precisely.\n\nTask\n- Input: a single line beginning with \"Words:\" followed by 16 comma\u2011separated tokens.\n- Output: exactly nine labeled lines, in this order and format (no extra text, no commentary outside these fields):\n  1. Reasoning: <step\u2011by\u2011step chain\u2011of\u2011thought explaining how you arrived at the groups>\n  2. Group 1 Words: w,w,w,w\n  3. Group 1 Reason: short label or explanation\n  4. Group 2 Words: w,w,w,w\n  5. Group 2 Reason: short label or explanation\n  6. Group 3 Words: w,w,w,w\n  7. Group 3 Reason: short label or explanation\n  8. Group 4 Words: w,w,w,w\n  9. Group 4 Reason: short label or explanation\n\nFormatting and constraints (must follow exactly)\n- Each \"Group N Words\" line must contain exactly four words separated by commas and optional single spaces (no trailing commas). Use only words from the input; do not introduce new words.\n- Use every input word exactly once across the four groups (no duplicates, no omissions).\n- Words in group lines should match the input tokens (spelling) but capitalization may be normalized; avoid adding punctuation, parentheses, or extra commentary inside group lines.\n- Each \"Group N Reason\" must be a short human\u2011readable label (preferably 1\u20136 words).\n- The \"Reasoning\" line should be a concise chain\u2011of\u2011thought that: (a) explains which clusters you tried, (b) justifies the final grouping choices, and (c ends by confirming that all 16 words are used exactly once. Keep the reasoning focused and relevant.\n\nDecision policy\n- If multiple plausible groupings exist, choose the single best partition and explain why you preferred it in the Reasoning line.\n- Do not output any additional examples, apologias, or meta commentary\u2014only the nine labeled lines described above.\n\nExample (for format only \u2014 do not copy these words except when they are the actual input)\nWords: a,b,c,...,p\nReasoning: I looked for semantic clusters (X, Y, Z) and orthographic patterns; I chose groups that maximize semantic coherence and use each word once; verification: all 16 used once.\nGroup 1 Words: a,b,c,d\nGroup 1 Reason: short label\nGroup 2 Words: e,f,g,h\nGroup 2 Reason: short label\nGroup 3 Words: i,j,k,l\nGroup 3 Reason: short label\nGroup 4 Words: m,n,o,p\nGroup 4 Reason: short label\n\nNow process the actual input line that begins with \"Words:\" and produce the nine labeled output lines exactly as specified. Be precise \u2014 lives (the downstream system) depend on it.",
+  "fields": [
+    {
+      "prefix": "Words:",
+      "description": "16 words to group into 4 categories"
+    },
+    {
+      "prefix": "Reasoning:",
+      "description": "Step-by-step reasoning exploring different grouping strategies"
+    },
+    {
+      "prefix": "Group 1 Words:",
+      "description": "First group of exactly 4 words (comma-separated)"
+    },
+    {
+      "prefix": "Group 1 Reason:",
+      "description": "Connecting theme for group 1"
+    },
+    {
+      "prefix": "Group 2 Words:",
+      "description": "Second group of exactly 4 words (comma-separated)"
+    },
+    {
+      "prefix": "Group 2 Reason:",
+      "description": "Connecting theme for group 2"
+    },
+    {
+      "prefix": "Group 3 Words:",
+      "description": "Third group of exactly 4 words (comma-separated)"
+    },
+    {
+      "prefix": "Group 3 Reason:",
+      "description": "Connecting theme for group 3"
+    },
+    {
+      "prefix": "Group 4 Words:",
+      "description": "Fourth group of exactly 4 words (comma-separated)"
+    },
+    {
+      "prefix": "Group 4 Reason:",
+      "description": "Connecting theme for group 4"
+    }
+  ]
+}

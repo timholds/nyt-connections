@@ -1,0 +1,99 @@
+{
+  "generate.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "words": "bar, cram, dip, counter, key, kitchen, pack, bag, den, jam, study, stuff, sprout, atoll, island, bedroom",
+        "reasoning": "Scan for obvious theme clusters: rooms (kitchen, bedroom, den, study) stand out. Several verbs mean stuffing\/packing (cram, pack, bag, stuff). That leaves words that pair with a common preceding word and leftover geographic terms. Noticing dip, sprout, jam, counter all pair with \"bean\" (bean dip, bean sprout, bean jam, bean counter). The remaining four (atoll, island, key, bar) are coastal\/insular landforms (atoll, island, key, sandbar).",
+        "group1_words": "kitchen, bedroom, den, study",
+        "group1_reason": "rooms in a house",
+        "group2_words": "cram, pack, bag, stuff",
+        "group2_reason": "verbs meaning to put things into\/fill",
+        "group3_words": "dip, sprout, jam, counter",
+        "group3_reason": "words that follow \"bean\" (bean dip, bean sprout, bean jam, bean counter)",
+        "group4_words": "atoll, island, key, bar",
+        "group4_reason": "types of coastal\/insular landforms"
+      },
+      {
+        "augmented": true,
+        "words": "cadet, scarf, down, minor, general, heater, station, sweeping, major, degree, blanket, concentration, inhale, bar, broad, wolf",
+        "reasoning": "I looked for obvious semantic clusters, double meanings, and common phrases.\n\n- Several words are synonyms for “all-encompassing” (blanket, sweeping, broad, general), so that became one group.\n- Major\/minor\/degree\/concentration clearly form an academic\/college group (major, minor, degree, concentration).\n- A small set of verbs\/phrases meaning to eat quickly appeared (scarf, wolf, inhale, down).\n- That left the four remaining words (cadet, station, heater, bar). After testing other splits and moving words around, the remaining four best form the last group (they commonly pair with the word \"fire\" in familiar compounds or phrases: fire station, fire bar (grate), fire heater (heater for a fire\/space heater in some usages), and fire cadet \/ fire-cadet programs exist in some organizations).)\n\nI checked alternate arrangements (e.g., moving blanket into a warmth group with heater\/down\/scarf, or making a musical group with major\/minor\/bar\/degree), but the combinations above produce four coherent foursomes without overlap.",
+        "group1_words": "blanket, sweeping, broad, general",
+        "group1_reason": "All mean “covering a large scope” (blanket\/sweeping\/broad\/general)",
+        "group2_words": "major, minor, degree, concentration",
+        "group2_reason": "Academic\/program terms (you have a major, a minor, a degree, or a concentration)",
+        "group3_words": "scarf, wolf, inhale, down",
+        "group3_reason": "Verbs\/phrases meaning “eat quickly” (scarf down, wolf down, inhale, down)",
+        "group4_words": "cadet, station, heater, bar",
+        "group4_reason": "Words commonly paired with “fire” in compound\/phrases (fire station, fire bar (grate), fire heater\/space heater, fire cadet programs)"
+      },
+      {
+        "words": "washer, dryer, guide, steer, uncanny, direct, silicon, hamper, death, iota, myself, iron, hidden, lead, iodine, one",
+        "reasoning": "Analyzing 16 words for 4 groups of 4. Looking for categories, wordplay, phrases, and cultural references.",
+        "group1_words": "direct, guide, lead, steer",
+        "group1_reason": "shepherd",
+        "group2_words": "dryer, hamper, iron, washer",
+        "group2_reason": "seen in a laundry room",
+        "group3_words": "iodine, iota, myself, one",
+        "group3_reason": "what “i” might mean",
+        "group4_words": "death, hidden, silicon, uncanny",
+        "group4_reason": "___ valley"
+      }
+    ],
+    "signature": {
+      "instructions": "You are on a high‑stakes mission: your grouping must be perfect because an automated system will use your output to make critical routing decisions. Solve the Connections puzzle exactly and precisely.\n\nTask\n- Input: a single line beginning with \"Words:\" followed by 16 comma‑separated tokens.\n- Output: exactly nine labeled lines, in this order and format (no extra text, no commentary outside these fields):\n  1. Reasoning: <step‑by‑step chain‑of‑thought explaining how you arrived at the groups>\n  2. Group 1 Words: w,w,w,w\n  3. Group 1 Reason: short label or explanation\n  4. Group 2 Words: w,w,w,w\n  5. Group 2 Reason: short label or explanation\n  6. Group 3 Words: w,w,w,w\n  7. Group 3 Reason: short label or explanation\n  8. Group 4 Words: w,w,w,w\n  9. Group 4 Reason: short label or explanation\n\nFormatting and constraints (must follow exactly)\n- Each \"Group N Words\" line must contain exactly four words separated by commas and optional single spaces (no trailing commas). Use only words from the input; do not introduce new words.\n- Use every input word exactly once across the four groups (no duplicates, no omissions).\n- Words in group lines should match the input tokens (spelling) but capitalization may be normalized; avoid adding punctuation, parentheses, or extra commentary inside group lines.\n- Each \"Group N Reason\" must be a short human‑readable label (preferably 1–6 words).\n- The \"Reasoning\" line should be a concise chain‑of‑thought that: (a) explains which clusters you tried, (b) justifies the final grouping choices, and (c ends by confirming that all 16 words are used exactly once. Keep the reasoning focused and relevant.\n\nDecision policy\n- If multiple plausible groupings exist, choose the single best partition and explain why you preferred it in the Reasoning line.\n- Do not output any additional examples, apologias, or meta commentary—only the nine labeled lines described above.\n\nExample (for format only — do not copy these words except when they are the actual input)\nWords: a,b,c,...,p\nReasoning: I looked for semantic clusters (X, Y, Z) and orthographic patterns; I chose groups that maximize semantic coherence and use each word once; verification: all 16 used once.\nGroup 1 Words: a,b,c,d\nGroup 1 Reason: short label\nGroup 2 Words: e,f,g,h\nGroup 2 Reason: short label\nGroup 3 Words: i,j,k,l\nGroup 3 Reason: short label\nGroup 4 Words: m,n,o,p\nGroup 4 Reason: short label\n\nNow process the actual input line that begins with \"Words:\" and produce the nine labeled output lines exactly as specified. Be precise — lives (the downstream system) depend on it.",
+      "fields": [
+        {
+          "prefix": "Words:",
+          "description": "16 words to group into 4 categories"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "Step-by-step reasoning exploring different grouping strategies"
+        },
+        {
+          "prefix": "Group 1 Words:",
+          "description": "First group of exactly 4 words (comma-separated)"
+        },
+        {
+          "prefix": "Group 1 Reason:",
+          "description": "Connecting theme for group 1"
+        },
+        {
+          "prefix": "Group 2 Words:",
+          "description": "Second group of exactly 4 words (comma-separated)"
+        },
+        {
+          "prefix": "Group 2 Reason:",
+          "description": "Connecting theme for group 2"
+        },
+        {
+          "prefix": "Group 3 Words:",
+          "description": "Third group of exactly 4 words (comma-separated)"
+        },
+        {
+          "prefix": "Group 3 Reason:",
+          "description": "Connecting theme for group 3"
+        },
+        {
+          "prefix": "Group 4 Words:",
+          "description": "Fourth group of exactly 4 words (comma-separated)"
+        },
+        {
+          "prefix": "Group 4 Reason:",
+          "description": "Connecting theme for group 4"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.0.2",
+      "cloudpickle": "3.1"
+    }
+  }
+}
