@@ -11,6 +11,7 @@ from dspy.teleprompt import MIPROv2
 from solvers.dspy_solver import ConnectionsSolver, ConnectionsSignature
 import random
 import pickle
+import litellm
 
 
 def normalize_groups(groups: List[Set[str]]) -> List[Set[str]]:
@@ -139,6 +140,9 @@ def run_optimization(model: str = "gpt-5-mini"):
     # Check if this is a GPT-5 reasoning model
     if 'gpt-5' in model.lower():
         # GPT-5 models require specific parameters
+        # Enable dropping unsupported params for GPT-5 compatibility
+        litellm.drop_params = True
+        
         lm = dspy.LM(
             model=model,
             api_key=api_key,
@@ -185,11 +189,19 @@ def run_optimization(model: str = "gpt-5-mini"):
     print(f"   - Validating on 10 examples")
     print(f"   - Running 10 optimization trials")
     
-    optimizer = MIPROv2(
-        metric=puzzle_accuracy_metric,
-        init_temperature=0.7,
-        verbose=True
-    )
+    # GPT-5 requires temperature=1.0, so we need to handle this specially
+    if 'gpt-5' in model.lower():
+        optimizer = MIPROv2(
+            metric=puzzle_accuracy_metric,
+            init_temperature=1.0,  # GPT-5 only supports temperature=1.0
+            verbose=True
+        )
+    else:
+        optimizer = MIPROv2(
+            metric=puzzle_accuracy_metric,
+            init_temperature=0.7,
+            verbose=True
+        )
     
     # Use smaller subset for cost efficiency
     train_subset = train_set[:30]
@@ -238,22 +250,26 @@ def run_optimization(model: str = "gpt-5-mini"):
     optimized_solver.save(solver_filename)
     print(f"   ✓ Saved optimized solver to {solver_filename}")
     
-    # Extract and save the optimized signature
-    if hasattr(optimized_solver.generate, 'signature'):
-        sig = optimized_solver.generate.signature
-        
-        # Extract field descriptions
-        optimized_fields = {}
-        for field_name in sig.fields:
-            field = sig.fields[field_name]
-            if hasattr(field, 'json_schema_extra'):
-                optimized_fields[field_name] = field.json_schema_extra.get('desc', '')
+    # The optimized solver is already saved as JSON above
+    # Now let's extract additional useful information from the saved file
+    
+    # Load back the saved JSON to extract instructions and demos
+    with open(solver_filename, 'r') as f:
+        saved_data = json.load(f)
+    
+    prompts_filename = None
+    demos_filename = None
+    
+    # Extract optimized instructions/signature if available
+    if 'generate.predict' in saved_data and 'signature' in saved_data['generate.predict']:
+        signature_data = saved_data['generate.predict']['signature']
         
         prompts_filename = f"optimized_prompts_{model_suffix}.json"
         with open(prompts_filename, 'w') as f:
             json.dump({
                 'model': model,
-                'field_descriptions': optimized_fields,
+                'instructions': signature_data.get('instructions', ''),
+                'fields': signature_data.get('fields', []),
                 'baseline_score': baseline_avg,
                 'optimized_score': opt_avg,
                 'improvement': opt_avg - baseline_avg
@@ -261,31 +277,26 @@ def run_optimization(model: str = "gpt-5-mini"):
         
         print(f"   ✓ Saved optimized prompts to {prompts_filename}")
     
-    # Save the demos if any were selected
-    if hasattr(optimized_solver.generate, 'demos') and optimized_solver.generate.demos:
-        demos_data = []
-        for demo in optimized_solver.generate.demos:
-            demo_dict = {}
-            for field in ['words', 'reasoning', 'group1_words', 'group1_reason',
-                         'group2_words', 'group2_reason', 'group3_words', 'group3_reason',
-                         'group4_words', 'group4_reason']:
-                if hasattr(demo, field):
-                    demo_dict[field] = getattr(demo, field)
-            demos_data.append(demo_dict)
+    # Extract demos if available
+    if 'generate.predict' in saved_data and 'demos' in saved_data['generate.predict']:
+        demos_data = saved_data['generate.predict']['demos']
         
-        demos_filename = f"optimized_demos_{model_suffix}.json"
-        with open(demos_filename, 'w') as f:
-            json.dump(demos_data, f, indent=2)
-        
-        print(f"   ✓ Saved {len(demos_data)} optimized demos to {demos_filename}")
+        if demos_data:  # Only save if there are actual demos
+            demos_filename = f"optimized_demos_{model_suffix}.json"
+            with open(demos_filename, 'w') as f:
+                json.dump(demos_data, f, indent=2)
+            
+            print(f"   ✓ Saved {len(demos_data)} optimized demos to {demos_filename}")
     
     print("\n" + "="*80)
     print("Optimization Complete!")
     print("="*80)
     print(f"\nOptimized components saved for model {model}:")
     print(f"1. {solver_filename} - Complete optimized solver")
-    print(f"2. {prompts_filename} - Optimized field descriptions (if extracted)")
-    print(f"3. {demos_filename} - Best few-shot examples (if selected)")
+    if prompts_filename:
+        print(f"2. {prompts_filename} - Optimized field descriptions")
+    if demos_filename:
+        print(f"3. {demos_filename} - Best few-shot examples")
     print("\nSee apply_optimization.py for how to use these in your solvers.")
     
     return optimized_solver

@@ -175,7 +175,7 @@ def main():
     parser.add_argument("--no-score", action="store_true",
                         help="Skip scoring the solution against ground truth")
     parser.add_argument("--model", type=str, default="gpt-4o-mini",
-                        choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+                        choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-5-mini"],
                         help="OpenAI model to use (default: gpt-4o-mini)")
     parser.add_argument("--solver", type=str, default="baseline",
                         choices=["baseline", "few-shot", "dspy", "multi-stage", "hungarian", "constraint"],

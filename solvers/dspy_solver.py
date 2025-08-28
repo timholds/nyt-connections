@@ -284,34 +284,52 @@ class DSPySolver(BaseSolver):
                 if not api_key:
                     raise ValueError("OPENAI_API_KEY environment variable not set")
                 
-                self.lm = dspy.LM(
-                    model=model,
-                    api_key=api_key,
-                    max_tokens=800,
-                    temperature=0.7
-                )
+                # GPT-5 models require specific parameters
+                if 'gpt-5' in model.lower():
+                    import litellm
+                    litellm.drop_params = True
+                    self.lm = dspy.LM(
+                        model=model,
+                        api_key=api_key,
+                        max_tokens=20000,
+                        temperature=1.0
+                    )
+                else:
+                    self.lm = dspy.LM(
+                        model=model,
+                        api_key=api_key,
+                        max_tokens=800,
+                        temperature=0.7
+                    )
                 dspy.settings.configure(lm=self.lm)
             
             # Initialize solver if needed
             if not self.dspy_solver:
-                # Try model-specific optimization file first, then generic
-                model_suffix = model.replace("-", "_")
+                # Always try to use gpt-5-mini optimization first if available (it's our best optimization)
                 optimized_files = [
-                    f'optimized_solver_{model_suffix}.json',
-                    'optimized_solver.json'
+                    'optimized_solver_gpt_5_mini.json',
+                    'optimized_solver.json'  # Fallback to generic if no gpt-5-mini optimization
                 ]
                 
                 loaded_optimization = False
                 for opt_file in optimized_files:
                     if self.use_optimized and os.path.exists(opt_file):
                         # Load the MIPRO-optimized module
-                        print(f"Loading MIPRO-optimized solver configuration from {opt_file}...")
+                        print(f"✓ Loading MIPRO-optimized solver from {opt_file}")
+                        if 'gpt_5_mini' in opt_file:
+                            print(f"  Note: Using gpt-5-mini optimization with {model}")
+                        print(f"  File size: {os.path.getsize(opt_file)} bytes")
                         self.dspy_solver = dspy.Module()
                         self.dspy_solver.load(opt_file)
                         loaded_optimization = True
                         
+                        # Debug: Check what was loaded
+                        print(f"  ✓ Module loaded successfully")
+                        print(f"  ✓ Has 'generate' attribute: {hasattr(self.dspy_solver, 'generate')}")
+                        
                         # If the loaded module doesn't have a generate method, wrap it
                         if not hasattr(self.dspy_solver, 'generate'):
+                            print(f"  → Reconstructing optimized module from config...")
                             # Create a ChainOfThought with the optimized signature
                             with open(opt_file, 'r') as f:
                                 config = json.load(f)
@@ -319,6 +337,7 @@ class DSPySolver(BaseSolver):
                             # The optimized config contains the signature and demos
                             if 'generate.predict' in config:
                                 opt_config = config['generate.predict']
+                                print(f"  → Found optimized signature with instructions")
                                 
                                 # Create a custom signature with optimized instructions
                                 class OptimizedConnectionsSignature(dspy.Signature):
@@ -352,6 +371,9 @@ class DSPySolver(BaseSolver):
                 
                 # If no optimization was loaded, use standard solver
                 if not loaded_optimization:
+                    print(f"ℹ️  No optimization file found")
+                    print(f"   Checked: {', '.join(optimized_files)}")
+                    print(f"   Using standard DSPy solver")
                     self.dspy_solver = ConnectionsSolver()
             
             # Get similar examples for few-shot learning

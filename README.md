@@ -1,109 +1,127 @@
 # NYT Connections Solver
 
-A solver for NYT Connections puzzles using word embeddings and semantic similarity.
+A word puzzle solver that partitions 16 words into 4 groups of logically-related words using LLMs.
 
-## Embedding Storage & Performance
+## Setup Instructions
 
-The system generates embeddings for both individual **words** (from puzzles) and **themes** (category descriptions like "nba teams" or "palindromes"). These are stored separately since they serve different semantic purposes - themes represent abstract concepts while words are concrete tokens. 
-
-Key design choices:
-
-1. **Unnormalized Storage**: Embeddings are stored with their original magnitudes from OpenAI, not normalized to unit vectors. This preserves information useful for outlier detection and clustering algorithms.
-
-2. **Dual Format Storage**: Maintains embeddings as both a dictionary (for compatibility) and a NumPy matrix (for speed). This trades ~30MB extra memory for 100-1000x faster operations.
-
-3. **Vectorized Operations**: Uses NumPy matrix multiplication to compute all 256 pairwise similarities for a 16-word puzzle in a single operation (~10 microseconds vs ~10 milliseconds).
-
-4. **Float64 Precision**: Uses double precision for better numerical stability in vector math operations.
-
-The pickle format loads in ~0.01 seconds compared to ~1-2 seconds for JSON, making iterative development much faster. For our ~4,000 unique words and ~1,600 themes with 1,536-dimensional embeddings, the memory footprint is about 48MB, which easily fits in RAM while enabling instant lookups.
-
-## Setup
-
+1. **Create and activate virtual environment**
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+uv venv puzzle-env --python 3.12
+source puzzle-env/bin/activate
+```
 
-# Set OpenAI API key
-export OPENAI_API_KEY='your-key-here'
+2. **Install dependencies**
+```bash
+uv pip install -r requirements.txt
+```
+Note: If `uv` is not installed, use `pip install -r requirements.txt`
 
-# Get embeddings (one-time, ~$0.10)
-# This creates both JSON and optimized pickle formats automatically
+3. **Set OpenAI API key**
+```bash
+export OPENAI_API_KEY='your-api-key-here'
+```
+
+4. **Run the solver**
+```bash
+python solve.py --file test.jsonl --solver dspy --use-api --limit 500
+```
+
+5. **Optional: Generate embeddings** (only needed for Hungarian solver, ~$0.10)
+```bash
 python get_embeddings.py
 ```
 
-## LLM API Design Choice
+## Quick Start - Running the Solver
 
-The solver uses OpenAI's structured output (`beta.chat.completions.parse`) to ensure reliable, validated responses with reasoning for each group. While this requires models that support structured output (gpt-4o-mini or newer), it guarantees valid JSON responses matching our Pydantic schema and provides meaningful explanations for each grouping. This is crucial for understanding the model's reasoning and debugging incorrect groupings. The cost remains very low with gpt-4o-mini at $0.15/1M input tokens and $0.60/1M output tokens - running on 400 puzzles costs less than $0.20 total.
+The solver automatically grades solutions against ground truth by default:
 
-## Pydantic Validation with Retry Logic
+### Basic Usage
+```bash
+# Run solver on one puzzle with automatic grading
+python solve.py
 
-The solver enforces strict puzzle constraints using Pydantic models with custom validators:
-- **Exactly 4 groups** of 4 words each
-- **All 16 words used once** - no duplicates, no omissions
-- **Reasoning required** for each grouping
+# Run on multiple puzzles from a file
+python solve.py --file test.jsonl --limit 10
+```
 
-### Retry Strategy by Solver
+### Testing Different Solvers
+Multiple solver approaches with different quality/cost/latency tradeoffs:
 
-- **BaselineSolver & FewShotSolver**: Use the inherited BaseSolver retry logic with OpenAI structured outputs - up to 3 retries with customized error messages for specific validation failures
-- **DSPySolver**: Custom retry logic that adds validation feedback to DSPy demos, adjusting temperature between attempts for variety
-- **MultiStageSolver**: Retries only the refinement stage (up to 3 times) since the validation→refinement pipeline should handle most issues
-- **HungarianSolver**: No retry needed - deterministic algorithm that always produces valid 4x4 partitions
-- **ConstraintSolver**: No retry needed - generates many overlapping candidates then uses constraint solving to find the best valid partition
+```bash
+# Baseline solver (simplest, fewest tokens)
+python solve.py --solver baseline --use-api
 
-The key insight is that different solver architectures require different retry approaches: structured output solvers benefit from Pydantic validation retries, DSPy solvers need custom feedback mechanisms, and algorithmic solvers (Hungarian, constraint) guarantee valid outputs by design.
+# Few-shot solver with static examples
+python solve.py --solver few-shot --use-api
 
+# DSPy solver with optimized examples (best accuracy)
+python solve.py --solver dspy --use-api
 
-## Validation Metrics
+# Multi-stage reasoning pipeline (more expensive)
+python solve.py --solver multi-stage --use-api
 
-The scoring system (`score.py`) implements comprehensive metrics to understand model performance beyond simple accuracy:
+# Hungarian algorithm solver (deterministic, requires embeddings)
+python solve.py --solver hungarian --use-api
 
-- **Exact Match & Group Accuracy**: Track perfect solutions and number of correct groups (0-4), identifying if models consistently get 3/4 groups right with one problematic category
-- **Word Placement & Pairwise Accuracy**: Measure fine-grained performance - whether individual words and word pairs are correctly grouped, helping distinguish partial understanding from random guessing
-- **Two-word Swap Detection**: Identifies near-misses where just 2 words are swapped between otherwise correct groups, revealing if the model understands the categories but makes minor boundary errors
-- **Average Group Overlap**: Shows how close incorrect groups are to being right, useful for understanding whether wrong answers still capture some semantic similarity
+# Constraint-based solver (hybrid approach)
+python solve.py --solver constraint --use-api
 
-These metrics help distinguish systematic errors from random failures and guide improvements - for example, high pairwise accuracy with low exact match suggests the model understands relationships but struggles with precise boundaries between similar categories.
+# Compare all solvers at once
+python solve.py --all --use-api --limit 5
+```
 
-## Solver Architecture
+### Additional Parameters
+```bash
+# Process multiple puzzles
+python solve.py --limit 10
 
-The system includes a modular solver architecture in the `solvers/` folder:
-- `base.py` - Abstract base class all solvers inherit from
-- `models.py` - Shared Pydantic models for structured outputs
-- `baseline.py` - Simple baseline solver
-- `few_shot.py` - Few-shot solver that includes examples in the prompt
-- `dspy_solver.py` - DSPy-based solver with optimized example selection
-- `multi_stage_solver.py` - Multi-stage solver (if available)
+# Use different models
+python solve.py --model gpt-4o
+python solve.py --model gpt-4o-mini  # default, most cost-effective
+python solve.py --model gpt-5-mini  # if available
 
-### Solver Approaches
+# Skip automatic grading (just show solutions)
+python solve.py --no-score
 
-- **BaselineSolver**: Simplest approach with just a well-crafted prompt
-- **FewShotSolver**: Uses simple, static examples directly in the prompt (naive approach)
-- **DSPySolver**: Uses DSPy's optimization capabilities to dynamically select and potentially optimize examples
-- **MultiStageSolver**: Four-stage reasoning pipeline (theme analysis → hypothesis generation → validation → refinement) for systematic solving
+# Use dummy responses for testing (no API calls)
+python solve.py  # without --use-api flag
+```
 
-Use `--solver baseline`, `--solver few-shot`, `--solver dspy`, or `--solver multi-stage` when running `solve.py`.
+## Viewing Experiment History
 
-### DSPy Prompt Optimization
+After running experiments, view and compare results:
 
-The DSPy solvers can be optimized using MIPRO (Multi-Prompt Instruction Proposal Optimizer) to automatically learn better prompts from examples. This optimization:
-- Learns optimal field descriptions for the signature (what to ask for in each output field)
-- Optimizes the chain-of-thought reasoning template
-- Selects the best few-shot examples for in-context learning
-- Runs once and saves artifacts that can be reused across all DSPy-based solvers
+```bash
+# View experiment history and statistics
+python score.py --compare
+```
 
-Run `python optimize_once.py` to perform optimization (costs ~$1-2 in API calls). This creates:
-- `optimized_solver.json` - Complete optimized module
-- `optimized_prompts.json` - Optimized field descriptions to apply to any DSPy signature
-- `optimized_demos.json` - Best few-shot examples selected by MIPRO
+## Optional: DSPy Prompt Optimization
 
-The optimization metric is order-independent: it doesn't care about word order within groups or group order between predictions.
+To optimize the DSPy solver's prompts using MIPRO (costs ~$1-2):
+```bash
+python optimize_once.py
+```
+This creates optimized prompt artifacts that improve DSPy solver performance.
 
-## Files
+## Key Files
 
-- `examples.jsonl` - 399 puzzle examples with solutions
-- `get_embeddings.py` - Fetches embeddings from OpenAI (includes both words and themes)
-- `embedding_store.py` - Optimized storage class for fast lookups
-- `embedding_utils.py` - Utility functions for similarity and clustering
-- `solve.py` - Main solver implementation with pluggable solvers
-- `score.py` - Comprehensive scoring system with detailed metrics
+- `solve.py` - Main solver with automatic grading
+- `score.py` - View experiment history and statistics
+- `solvers/` - Modular solver implementations
+  - `baseline.py` - Simple prompt-based solver
+  - `few_shot.py` - Solver with static examples
+  - `dspy_solver.py` - DSPy-based solver with dynamic example selection
+  - `multi_stage_solver.py` - Multi-stage reasoning pipeline
+  - `hungarian_solver.py` - Deterministic similarity-based algorithm
+  - `constraint_solver.py` - Constraint programming approach
+- `get_embeddings.py` - Fetches and caches OpenAI embeddings
+- `requirements.txt` - Python dependencies
+
+## Metrics
+
+The solver automatically reports:
+- **Exact Match**: Percentage of perfectly solved puzzles
+- **Group Accuracy**: Average number of correct groups (0-4)
+- **Pairwise Accuracy**: Percentage of word pairs correctly grouped together
+- **Near Misses**: Puzzles with only 2 words swapped between groups

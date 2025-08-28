@@ -348,7 +348,7 @@ def main():
     parser.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging")
     parser.add_argument("--experiment-name", type=str, help="Name for the W&B experiment")
     parser.add_argument("--model", type=str, default="gpt-4o-mini", 
-                       choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+                       choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt5-mini"],
                        help="OpenAI model to use")
     parser.add_argument("--solver", type=str, default="baseline",
                        choices=["baseline", "few-shot", "dspy", "multi-stage", "hungarian", "constraint"],

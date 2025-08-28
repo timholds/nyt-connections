@@ -38,3 +38,5 @@ timestamp,solver,model,total_acc,group_acc,correct,total,test_file,mode
 2025-08-28T01:28:29.979679,multi-stage,gpt-4o-mini,5.0,21.25,1,20,examples.jsonl,api
 2025-08-28T01:28:29.979682,baseline,gpt-4o-mini,0.0,23.75,0,20,examples.jsonl,api
 2025-08-28T01:28:29.979686,constraint,gpt-4o-mini,0.0,5.0,0,20,examples.jsonl,api
+2025-08-28T01:33:03.934333,hungarian,gpt5-mini,8.25,26.6875,33,400,examples.jsonl,api
+2025-08-28T02:06:52.898113,baseline,gpt-4o-mini,0.0,20.0,0,20,examples.jsonl,api
