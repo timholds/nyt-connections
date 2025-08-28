@@ -361,12 +361,15 @@ class DSPySolver(BaseSolver):
                                 # Apply any optimized demos if they exist
                                 if 'demos' in opt_config and opt_config['demos']:
                                     solver.generate.demos = opt_config['demos']
+                                    print(f"  → Applied {len(opt_config['demos'])} optimized demos")
                                 
                                 self.dspy_solver = solver
+                                print(f"  ✓ Optimized solver fully reconstructed")
                             else:
                                 # Fallback to standard solver
-                                print("Warning: Optimized config format not recognized, using standard solver")
+                                print("⚠️ WARNING: Optimized config format not recognized, falling back to standard solver")
                                 self.dspy_solver = ConnectionsSolver()
+                                loaded_optimization = False  # Mark as failed
                         break  # Successfully loaded optimization
                 
                 # If no optimization was loaded, use standard solver

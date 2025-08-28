@@ -23,7 +23,7 @@ export OPENAI_API_KEY='your-api-key-here'
 
 4. **Run the solver**
 ```bash
-python solve.py --file test.jsonl --solver dspy --use-api --limit 500
+python solve.py --file examples.jsonl --solver dspy --use-api --limit 500 --model gpt-5-mini
 ```
 
 5. **Optional: Generate embeddings** (only needed for Hungarian solver, ~$0.10)
@@ -31,54 +31,41 @@ python solve.py --file test.jsonl --solver dspy --use-api --limit 500
 python get_embeddings.py
 ```
 
-## Quick Start - Running the Solver
-
-The solver automatically grades solutions against ground truth by default:
-
-### Basic Usage
-```bash
-# Run solver on one puzzle with automatic grading
-python solve.py
-
-# Run on multiple puzzles from a file
-python solve.py --file test.jsonl --limit 10
-```
+The solver automatically grades solutions against ground truth by default.
 
 ### Testing Different Solvers
 Multiple solver approaches with different quality/cost/latency tradeoffs:
 
 ```bash
 # Baseline solver (simplest, fewest tokens)
-python solve.py --solver baseline --use-api
+python solve.py --solver baseline --use-api  --limit 500
 
 # Few-shot solver with static examples
-python solve.py --solver few-shot --use-api
+python solve.py --solver few-shot --use-api  --limit 500
 
 # DSPy solver with optimized examples (best accuracy)
-python solve.py --solver dspy --use-api
+python solve.py --solver dspy --use-api  --limit 500
 
 # Multi-stage reasoning pipeline (more expensive)
-python solve.py --solver multi-stage --use-api
+python solve.py --solver multi-stage --use-api --limit 500
 
 # Hungarian algorithm solver (deterministic, requires embeddings)
-python solve.py --solver hungarian --use-api
+python solve.py --solver hungarian --use-api  --limit 500
 
 # Constraint-based solver (hybrid approach)
-python solve.py --solver constraint --use-api
+python solve.py --solver constraint --use-api --limit 500
 
 # Compare all solvers at once
-python solve.py --all --use-api --limit 5
+python solve.py --all --use-api --limit 500
 ```
 
 ### Additional Parameters
 ```bash
-# Process multiple puzzles
-python solve.py --limit 10
 
 # Use different models
 python solve.py --model gpt-4o
 python solve.py --model gpt-4o-mini  # default, most cost-effective
-python solve.py --model gpt-5-mini  # if available
+python solve.py --model gpt-5-mini 
 
 # Skip automatic grading (just show solutions)
 python solve.py --no-score
@@ -95,14 +82,6 @@ After running experiments, view and compare results:
 # View experiment history and statistics
 python score.py --compare
 ```
-
-## Optional: DSPy Prompt Optimization
-
-To optimize the DSPy solver's prompts using MIPRO (costs ~$1-2):
-```bash
-python optimize_once.py
-```
-This creates optimized prompt artifacts that improve DSPy solver performance.
 
 ## Key Files
 
