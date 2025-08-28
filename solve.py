@@ -1,51 +1,8 @@
 import json
-import os
 import argparse
-from datetime import datetime
 from typing import List, Dict, Any
-from openai import OpenAI
-from pydantic import BaseModel, Field, field_validator
-
-
-class GroupSolution(BaseModel):
-    """A single group of 4 words with their connecting reason."""
-    words: List[str] = Field(description="Exactly 4 words that belong together", min_length=4, max_length=4)
-    reason: str = Field(description="The reason/theme connecting these 4 words")
-    
-    @field_validator('words')
-    @classmethod
-    def validate_words_count(cls, v):
-        if len(v) != 4:
-            raise ValueError(f"Each group must have exactly 4 words, got {len(v)}")
-        return v
-
-
-class PuzzleSolution(BaseModel):
-    """Complete solution to a Connections puzzle."""
-    groups: List[GroupSolution] = Field(
-        description="Exactly 4 groups of 4 words each",
-        min_length=4,
-        max_length=4
-    )
-    
-    @field_validator('groups')
-    @classmethod
-    def validate_groups(cls, v):
-        if len(v) != 4:
-            raise ValueError(f"Must have exactly 4 groups, got {len(v)}")
-        
-        # Check that all words are unique across groups
-        all_words = []
-        for group in v:
-            all_words.extend(group.words)
-        
-        if len(all_words) != len(set(all_words)):
-            raise ValueError("Words must be unique across all groups")
-        
-        if len(all_words) != 16:
-            raise ValueError(f"Total must be 16 unique words, got {len(set(all_words))}")
-        
-        return v
+from solvers import get_solver
+from solvers.models import PuzzleSolution
 
 
 def load_examples(filepath: str = "examples_test.jsonl") -> List[Dict[str, Any]]:
@@ -56,135 +13,12 @@ def load_examples(filepath: str = "examples_test.jsonl") -> List[Dict[str, Any]]
             examples.append(json.loads(line))
     return examples
 
+
 def extract_words(example: Dict[str, Any]) -> List[str]:
     """Extract just the words from an example."""
     return example["words"]
 
-def log_api_cost(model: str, prompt_tokens: int, completion_tokens: int, cost: float):
-    """
-    Log API cost to the tracking file.
-    
-    Args:
-        model: Model name used
-        prompt_tokens: Number of prompt tokens
-        completion_tokens: Number of completion tokens  
-        cost: Total cost in USD
-    """
-    log_file = "openai_api_costs.txt"
-    
-    # Read existing total if file exists
-    existing_total = 0
-    if os.path.exists(log_file):
-        with open(log_file, 'r') as f:
-            lines = f.readlines()
-            for line in reversed(lines):
-                if line.startswith("TOTAL:"):
-                    existing_total = float(line.split('$')[1].strip())
-                    break
-    
-    # Calculate new total
-    new_total = existing_total + cost
-    
-    # Append new entry
-    with open(log_file, 'a') as f:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        f.write(f"{timestamp} | Model: {model} | ")
-        f.write(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion | ")
-        f.write(f"Cost: ${cost:.4f}\n")
-        f.write(f"TOTAL: ${new_total:.4f}\n")
-        f.write("-" * 70 + "\n")
 
-def solve_puzzle(words: List[str], system_prompt: str = "", use_api: bool = False) -> PuzzleSolution:
-    """
-    Solve a Connections puzzle using OpenAI API with structured output.
-    
-    Args:
-        words: List of 16 words to group
-        system_prompt: System prompt for the model
-        use_api: Whether to make actual API call (vs dummy response)
-    
-    Returns:
-        PuzzleSolution with structured groups including reasoning
-    """
-    if not system_prompt:
-        system_prompt = """You are an expert at solving NYT Connections puzzles. 
-        Given 16 words, you need to group them into 4 groups of 4 words each.
-        Each group should have a clear connecting theme or category.
-        Consider various types of connections including:
-        - Literal meanings and categories
-        - Wordplay (palindromes, homophones, rhymes)
-        - Words that can precede or follow a common word
-        - Pop culture references
-        - Common phrases or idioms
-        Be concise but clear in your reasoning."""
-    
-    # Validate input
-    if len(words) != 16:
-        raise ValueError(f"Expected 16 words, got {len(words)}")
-    
-    if len(set(words)) != 16:
-        raise ValueError("All 16 words must be unique")
-    
-    # Format the user message with the puzzle
-    user_message = f"""Group these 16 words into 4 groups of 4 words each. 
-    Each group should share a common theme or connection.
-    
-    Words: {', '.join(words)}
-    
-    Provide a clear, concise reason for each grouping."""
-    
-    if use_api:
-        # Make actual API call with structured output
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
-        completion = client.beta.chat.completions.parse(
-            model="gpt-4o-mini",  # Cost-effective model that supports structured output
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            response_format=PuzzleSolution,
-        )
-        
-        # Extract the parsed solution - guaranteed to match our schema
-        solution = completion.choices[0].message.parsed
-        
-        # Track API costs (gpt-4o-mini pricing as of 2024)
-        # Input: $0.150 per 1M tokens, Output: $0.600 per 1M tokens
-        usage = completion.usage
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
-        
-        input_cost = (prompt_tokens / 1_000_000) * 0.150
-        output_cost = (completion_tokens / 1_000_000) * 0.600
-        total_cost = input_cost + output_cost
-        
-        # Log the cost
-        log_api_cost("gpt-4o-mini", prompt_tokens, completion_tokens, total_cost)
-        
-        print(f"\nAPI Cost: ${total_cost:.4f} ({prompt_tokens} prompt + {completion_tokens} completion tokens)")
-        
-    else:
-        # Print what would be sent to the LLM (dummy call for now)
-        print("=" * 80)
-        print("WOULD SEND TO LLM:")
-        print("-" * 40)
-        print(f"System Prompt: {system_prompt[:200]}..." if len(system_prompt) > 200 else system_prompt)
-        print("-" * 40)
-        print(f"User Message: {user_message[:200]}..." if len(user_message) > 200 else user_message)
-        print("=" * 80)
-        
-        # Create dummy response using Pydantic model
-        solution = PuzzleSolution(
-            groups=[
-                GroupSolution(words=list(words[:4]), reason="dummy group 1"),
-                GroupSolution(words=list(words[4:8]), reason="dummy group 2"),
-                GroupSolution(words=list(words[8:12]), reason="dummy group 3"),
-                GroupSolution(words=list(words[12:16]), reason="dummy group 4")
-            ]
-        )
-    
-    return solution
 
 def check_solution_correctness(predicted_solution: PuzzleSolution, ground_truth: Dict[str, Any]) -> bool:
     """
@@ -199,7 +33,7 @@ def check_solution_correctness(predicted_solution: PuzzleSolution, ground_truth:
     """
     # Extract groups from both
     predicted_groups = [group.words for group in predicted_solution.groups]
-    actual_groups = ground_truth['groups']
+    actual_groups = [group['words'] for group in ground_truth['groups']]
     
     # Normalize to sets of frozensets for comparison
     pred_normalized = {frozenset(group) for group in predicted_groups}
@@ -218,31 +52,86 @@ def main():
                         help="Make actual API calls instead of dummy responses")
     parser.add_argument("--no-score", action="store_true",
                         help="Skip scoring the solution against ground truth")
+    parser.add_argument("--model", type=str, default="gpt-4o-mini",
+                        choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+                        help="OpenAI model to use (default: gpt-4o-mini)")
+    parser.add_argument("--solver", type=str, default="baseline",
+                        choices=["baseline", "few-shot", "dspy"],
+                        help="Solver to use (default: baseline)")
+    parser.add_argument("--limit", type=int, default=1,
+                        help="Number of examples to process (default: 1)")
     args = parser.parse_args()
     
     # Load test examples
     examples = load_examples(args.file)
     print(f"Loaded {len(examples)} test examples from {args.file}")
+    print(f"Using solver: {args.solver}")
     
-    # Process first example as a demo
-    if examples:
-        first_example = examples[0]
-        words = extract_words(first_example)
-        print(f"\nProcessing first example with words: {words}")
+    # Limit examples to process
+    examples_to_process = examples[:args.limit]
+    print(f"Processing {len(examples_to_process)} example(s) (--limit={args.limit})")
+    
+    # Get the solver instance once
+    solver = get_solver(args.solver)
+    
+    # Track overall statistics
+    correct_count = 0
+    total_count = 0
+    
+    # Process each example
+    for idx, example in enumerate(examples_to_process):
+        total_count += 1
+        words = extract_words(example)
+        print(f"\n{'='*60}")
+        print(f"EXAMPLE {idx + 1}/{len(examples_to_process)}")
+        print(f"{'='*60}")
+        print(f"Processing example with words: {words}")
         
-        # Solve the puzzle (only passes words, not the solution)
-        solution = solve_puzzle(words, use_api=args.use_api)
+        # Solve the puzzle using the solver
+        try:
+            solution = solver.solve(words, use_api=args.use_api, model=args.model)
+        except Exception as e:
+            if "validation error" in str(e).lower() or "ValidationError" in str(type(e).__name__):
+                print(f"\n❌ SOLVER FAILED: Could not generate valid solution after retries")
+                print(f"Error: {str(e).split('For further')[0].strip()}")
+                print("\nSkipping to next example...")
+                continue
+            else:
+                raise  # Re-raise non-validation errors
         
-        print("\nSolution returned (Pydantic validated):")
-        print(solution.model_dump_json(indent=2))
+        print("\n" + "="*50)
+        print("PREDICTED SOLUTION:")
+        print("-"*50)
+        for i, group in enumerate(solution.groups, 1):
+            print(f"{i}. {', '.join(group.words)}")
+        print("\nREASONS:")
+        for i, group in enumerate(solution.groups, 1):
+            print(f"{i}. {group.reason}")
         
-        print("\nActual solution from dataset:")
-        print(json.dumps(first_example['solution'], indent=2))
+        print("\n" + "="*50)
+        print("ACTUAL SOLUTION:")
+        print("-"*50)
+        actual_groups = example['solution']['groups']
+        for i, group in enumerate(actual_groups, 1):
+            print(f"{i}. {', '.join(group['words'])}")
+        print("\nREASONS:")
+        for i, group in enumerate(actual_groups, 1):
+            print(f"{i}. {group['reason']}")
         
         # Check correctness by default (unless --no-score is passed)
         if not args.no_score:
-            is_correct = check_solution_correctness(solution, first_example['solution'])
-            print(f"\n✓ Solution is {'CORRECT' if is_correct else 'INCORRECT'}")
+            is_correct = check_solution_correctness(solution, example['solution'])
+            print("\n" + "="*50)
+            print(f"✓ Solution is {'CORRECT' if is_correct else 'INCORRECT'}")
+            if is_correct:
+                correct_count += 1
+    
+    # Print summary if multiple examples were processed
+    if total_count > 1 and not args.no_score:
+        print(f"\n{'='*60}")
+        print(f"SUMMARY: {correct_count}/{total_count} correct ({100*correct_count/total_count:.1f}%)")
+        print(f"{'='*60}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,2 +1,9 @@
 instructions.md
-examples.jsonl
+wandb/
+results*
+*.jsonl
+*.json
+*.pkl
+*.txt
+ideas.md
+CLAUDE.md

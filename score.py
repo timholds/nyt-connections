@@ -2,8 +2,9 @@ import json
 import argparse
 import os
 from datetime import datetime
-from typing import List, Dict, Any, Set, Tuple
+from typing import List, Dict, Any, Set, Tuple, Optional
 from solve import solve_puzzle, PuzzleSolution
+import wandb
 
 
 def normalize_groups(groups: List[List[str]]) -> Set[frozenset]:
@@ -102,7 +103,7 @@ def calculate_detailed_metrics(predicted: List[List[str]], actual: List[List[str
     return metrics
 
 
-def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api: bool = True, verbose: bool = False) -> Tuple[bool, PuzzleSolution, Dict[str, Any]]:
+def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api: bool = True, verbose: bool = False, log_to_wandb: bool = False) -> Tuple[bool, PuzzleSolution, Dict[str, Any]]:
     """
     Score a single puzzle by comparing model output to ground truth.
     
@@ -113,7 +114,7 @@ def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api
         verbose: Whether to print detailed output
     
     Returns:
-        Tuple of (is_correct, solution)
+        Tuple of (is_correct, solution, metrics)
     """
     # Get model's solution
     solution = solve_puzzle(words, use_api=use_api)
@@ -124,22 +125,39 @@ def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api
     # Check if correct
     is_correct = check_solution(predicted_groups, ground_truth)
     
+    # Calculate detailed metrics
+    metrics = calculate_detailed_metrics(predicted_groups, ground_truth)
+    
+    # Log to W&B if enabled
+    if log_to_wandb and wandb.run is not None:
+        wandb.log({
+            "puzzle/exact_match": metrics['exact_match'],
+            "puzzle/group_accuracy": metrics['group_accuracy'],
+            "puzzle/word_accuracy": metrics['word_accuracy'],
+            "puzzle/pairwise_accuracy": metrics['pairwise_accuracy'],
+            "puzzle/is_two_word_swap": metrics['is_two_word_swap'],
+            "puzzle/avg_group_overlap": metrics['avg_group_overlap'],
+            "puzzle/num_correct_groups": metrics['num_correct_groups'],
+        })
+    
     if verbose:
         print(f"\nWords: {words}")
         print(f"Predicted: {predicted_groups}")
         print(f"Actual: {ground_truth}")
         print(f"Correct: {is_correct}")
-        if not is_correct:
-            # Show which groups matched and which didn't
-            pred_normalized = normalize_groups(predicted_groups)
-            actual_normalized = normalize_groups(ground_truth)
-            matches = pred_normalized & actual_normalized
-            print(f"Matching groups: {len(matches)}/4")
+        print(f"\nDetailed Metrics:")
+        print(f"  Correct Groups: {metrics['num_correct_groups']}/4")
+        print(f"  Word Accuracy: {metrics['word_accuracy']*100:.1f}%")
+        print(f"  Pairwise Accuracy: {metrics['pairwise_accuracy']*100:.1f}%")
+        print(f"  Avg Group Overlap: {metrics['avg_group_overlap']*100:.1f}%")
+        if metrics['is_two_word_swap']:
+            print(f"  ⚠️  Two-word swap detected!")
     
-    return is_correct, solution
+    return is_correct, solution, metrics
 
 
-def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbose: bool = False) -> Dict[str, Any]:
+def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbose: bool = False, 
+                 wandb_config: Optional[Dict[str, Any]] = None, experiment_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Score model performance on entire dataset.
     
@@ -161,9 +179,36 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
     if limit:
         examples = examples[:limit]
     
+    # Initialize W&B if config provided
+    if wandb_config:
+        run_name = experiment_name or f"solver_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        wandb.init(
+            project="nyt-connections",
+            name=run_name,
+            config=wandb_config,
+            tags=["scoring", "solver"]
+        )
+        wandb.config.update({
+            "test_file": filepath,
+            "use_api": use_api,
+            "limit": limit,
+            "num_examples": len(examples)
+        })
+    
     # Score each example
     results = []
     correct_count = 0
+    
+    # Aggregate metrics
+    all_metrics = {
+        'exact_match': [],
+        'group_accuracy': [],
+        'word_accuracy': [],
+        'pairwise_accuracy': [],
+        'is_two_word_swap': [],
+        'avg_group_overlap': [],
+        'num_correct_groups': []
+    }
     
     for i, example in enumerate(examples):
         words = example["words"]
@@ -173,7 +218,17 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
             print(f"\n{'='*60}")
             print(f"Example {i+1}/{len(examples)}")
         
-        is_correct, solution = score_single_puzzle(words, ground_truth, use_api=use_api, verbose=verbose)
+        is_correct, solution, metrics = score_single_puzzle(
+            words, ground_truth, 
+            use_api=use_api, 
+            verbose=verbose,
+            log_to_wandb=(wandb_config is not None)
+        )
+        
+        # Aggregate metrics
+        for key, value in metrics.items():
+            if key in all_metrics:
+                all_metrics[key].append(value)
         
         if is_correct:
             correct_count += 1
@@ -182,7 +237,8 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
             "example_id": i,
             "correct": is_correct,
             "predicted": [group.model_dump() for group in solution.groups],
-            "actual": ground_truth
+            "actual": ground_truth,
+            "metrics": metrics
         })
         
         # Print running accuracy
@@ -193,11 +249,47 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
     # Calculate final metrics
     accuracy = correct_count / len(examples) * 100 if examples else 0
     
+    # Calculate aggregate statistics
+    summary_metrics = {}
+    for key, values in all_metrics.items():
+        if values:
+            summary_metrics[f"mean_{key}"] = sum(values) / len(values)
+            summary_metrics[f"min_{key}"] = min(values)
+            summary_metrics[f"max_{key}"] = max(values)
+    
+    # Log final metrics to W&B
+    if wandb_config and wandb.run is not None:
+        wandb.summary["final_accuracy"] = accuracy
+        wandb.summary["total_correct"] = correct_count
+        wandb.summary["total_incorrect"] = len(examples) - correct_count
+        
+        # Log aggregate metrics
+        for key, value in summary_metrics.items():
+            wandb.summary[key] = value
+        
+        # Create a table with detailed results
+        table = wandb.Table(columns=["example_id", "correct", "exact_match", "group_accuracy", 
+                                     "word_accuracy", "pairwise_accuracy", "is_two_word_swap"])
+        for result in results:
+            table.add_data(
+                result["example_id"],
+                result["correct"],
+                result["metrics"]["exact_match"],
+                result["metrics"]["group_accuracy"],
+                result["metrics"]["word_accuracy"],
+                result["metrics"]["pairwise_accuracy"],
+                result["metrics"]["is_two_word_swap"]
+            )
+        wandb.log({"results_table": table})
+        
+        wandb.finish()
+    
     return {
         "total_examples": len(examples),
         "correct": correct_count,
         "incorrect": len(examples) - correct_count,
         "accuracy": accuracy,
+        "summary_metrics": summary_metrics,
         "results": results
     }
 
@@ -211,6 +303,10 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print detailed output for each example")
     parser.add_argument("--no-save", action="store_true", help="Don't save results to file")
     parser.add_argument("--output", type=str, help="Custom output file path (default: results_<timestamp>.json)")
+    parser.add_argument("--wandb", action="store_true", help="Log results to Weights & Biases")
+    parser.add_argument("--experiment-name", type=str, help="Name for the W&B experiment")
+    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="Model name for tracking")
+    parser.add_argument("--solver-type", type=str, default="single-call", help="Type of solver strategy")
     
     args = parser.parse_args()
     
@@ -228,12 +324,25 @@ def main():
     print(f"Mode: {'API' if args.use_api else 'DUMMY (no API calls)'}")
     print("="*60)
     
+    # Prepare W&B config if requested
+    wandb_config = None
+    if args.wandb:
+        wandb_config = {
+            "model": args.model,
+            "solver_type": args.solver_type,
+            "test_file": os.path.basename(args.test_file),
+            "use_api": args.use_api,
+            "limit": args.limit,
+        }
+    
     # Run scoring
     results = score_dataset(
         args.test_file, 
         use_api=args.use_api,
         limit=args.limit,
-        verbose=args.verbose
+        verbose=args.verbose,
+        wandb_config=wandb_config,
+        experiment_name=args.experiment_name
     )
     
     # Print summary with better formatting
@@ -245,6 +354,20 @@ def main():
     print(f"Puzzles solved incorrectly: {results['incorrect']}")
     print("-"*60)
     print(f"ACCURACY: {results['accuracy']:.2f}%")
+    
+    # Print summary metrics if available
+    if 'summary_metrics' in results and results['summary_metrics']:
+        print("-"*60)
+        print("DETAILED METRICS:")
+        for key in ['exact_match', 'group_accuracy', 'word_accuracy', 'pairwise_accuracy']:
+            mean_key = f"mean_{key}"
+            if mean_key in results['summary_metrics']:
+                mean_val = results['summary_metrics'][mean_key]
+                min_val = results['summary_metrics'][f"min_{key}"]
+                max_val = results['summary_metrics'][f"max_{key}"]
+                print(f"  {key}: mean={mean_val:.3f}, min={min_val:.3f}, max={max_val:.3f}")
+        if 'mean_is_two_word_swap' in results['summary_metrics']:
+            print(f"  Two-word swap rate: {results['summary_metrics']['mean_is_two_word_swap']:.3f}")
     print("="*60)
     
     # Save results automatically unless --no-save
