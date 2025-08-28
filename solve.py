@@ -1,6 +1,7 @@
 import json
 import os
 import argparse
+from datetime import datetime
 from typing import List, Dict, Any
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
@@ -59,6 +60,40 @@ def extract_words(example: Dict[str, Any]) -> List[str]:
     """Extract just the words from an example."""
     return example["words"]
 
+def log_api_cost(model: str, prompt_tokens: int, completion_tokens: int, cost: float):
+    """
+    Log API cost to the tracking file.
+    
+    Args:
+        model: Model name used
+        prompt_tokens: Number of prompt tokens
+        completion_tokens: Number of completion tokens  
+        cost: Total cost in USD
+    """
+    log_file = "openai_api_costs.txt"
+    
+    # Read existing total if file exists
+    existing_total = 0
+    if os.path.exists(log_file):
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            for line in reversed(lines):
+                if line.startswith("TOTAL:"):
+                    existing_total = float(line.split('$')[1].strip())
+                    break
+    
+    # Calculate new total
+    new_total = existing_total + cost
+    
+    # Append new entry
+    with open(log_file, 'a') as f:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"{timestamp} | Model: {model} | ")
+        f.write(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion | ")
+        f.write(f"Cost: ${cost:.4f}\n")
+        f.write(f"TOTAL: ${new_total:.4f}\n")
+        f.write("-" * 70 + "\n")
+
 def solve_puzzle(words: List[str], system_prompt: str = "", use_api: bool = False) -> PuzzleSolution:
     """
     Solve a Connections puzzle using OpenAI API with structured output.
@@ -114,6 +149,21 @@ def solve_puzzle(words: List[str], system_prompt: str = "", use_api: bool = Fals
         # Extract the parsed solution - guaranteed to match our schema
         solution = completion.choices[0].message.parsed
         
+        # Track API costs (gpt-4o-mini pricing as of 2024)
+        # Input: $0.150 per 1M tokens, Output: $0.600 per 1M tokens
+        usage = completion.usage
+        prompt_tokens = usage.prompt_tokens
+        completion_tokens = usage.completion_tokens
+        
+        input_cost = (prompt_tokens / 1_000_000) * 0.150
+        output_cost = (completion_tokens / 1_000_000) * 0.600
+        total_cost = input_cost + output_cost
+        
+        # Log the cost
+        log_api_cost("gpt-4o-mini", prompt_tokens, completion_tokens, total_cost)
+        
+        print(f"\nAPI Cost: ${total_cost:.4f} ({prompt_tokens} prompt + {completion_tokens} completion tokens)")
+        
     else:
         # Print what would be sent to the LLM (dummy call for now)
         print("=" * 80)
@@ -136,6 +186,28 @@ def solve_puzzle(words: List[str], system_prompt: str = "", use_api: bool = Fals
     
     return solution
 
+def check_solution_correctness(predicted_solution: PuzzleSolution, ground_truth: Dict[str, Any]) -> bool:
+    """
+    Check if predicted solution matches ground truth.
+    
+    Args:
+        predicted_solution: PuzzleSolution from model
+        ground_truth: Ground truth from dataset
+    
+    Returns:
+        True if correct, False otherwise
+    """
+    # Extract groups from both
+    predicted_groups = [group.words for group in predicted_solution.groups]
+    actual_groups = ground_truth['groups']
+    
+    # Normalize to sets of frozensets for comparison
+    pred_normalized = {frozenset(group) for group in predicted_groups}
+    actual_normalized = {frozenset(group) for group in actual_groups}
+    
+    return pred_normalized == actual_normalized
+
+
 def main():
     """Main function to run the solver on test examples."""
     # Set up argument parser
@@ -144,6 +216,8 @@ def main():
                         help="Path to JSONL file with puzzle examples (default: examples_test.jsonl)")
     parser.add_argument("--use-api", action="store_true",
                         help="Make actual API calls instead of dummy responses")
+    parser.add_argument("--no-score", action="store_true",
+                        help="Skip scoring the solution against ground truth")
     args = parser.parse_args()
     
     # Load test examples
@@ -164,6 +238,11 @@ def main():
         
         print("\nActual solution from dataset:")
         print(json.dumps(first_example['solution'], indent=2))
+        
+        # Check correctness by default (unless --no-score is passed)
+        if not args.no_score:
+            is_correct = check_solution_correctness(solution, first_example['solution'])
+            print(f"\n✓ Solution is {'CORRECT' if is_correct else 'INCORRECT'}")
 
 if __name__ == "__main__":
     main()
