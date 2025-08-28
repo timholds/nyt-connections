@@ -1,11 +1,11 @@
-from typing import List
+from typing import List, Optional
 from .base import BaseSolver
 
 
 class BaselineSolver(BaseSolver):
     """Baseline solver with a simple prompt."""
     
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, current_words: Optional[List[str]] = None) -> str:
         """Get the system prompt for the baseline solver."""
         return """You are an expert at solving NYT Connections puzzles. 
         Given 16 words, you need to group them into 4 groups of 4 words each.

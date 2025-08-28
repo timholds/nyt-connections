@@ -1,9 +1,11 @@
 import json
 import argparse
 import os
+import csv
 from datetime import datetime
 from typing import List, Dict, Any, Set, Tuple, Optional
-from solve import solve_puzzle, PuzzleSolution
+from solvers import get_solver
+from solvers.models import PuzzleSolution
 import wandb
 
 
@@ -103,21 +105,25 @@ def calculate_detailed_metrics(predicted: List[List[str]], actual: List[List[str
     return metrics
 
 
-def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api: bool = True, verbose: bool = False, log_to_wandb: bool = False) -> Tuple[bool, PuzzleSolution, Dict[str, Any]]:
+def score_single_puzzle(words: List[str], ground_truth: List[List[str]], solver_name: str = "baseline", model: str = "gpt-4o-mini", use_api: bool = True, verbose: bool = False, log_to_wandb: bool = False) -> Tuple[bool, PuzzleSolution, Dict[str, Any]]:
     """
     Score a single puzzle by comparing model output to ground truth.
     
     Args:
         words: List of 16 words to group
         ground_truth: The correct grouping
+        solver_name: Name of solver to use (baseline, few-shot, dspy)
+        model: Model name to use (gpt-4o-mini, gpt-4o, etc.)
         use_api: Whether to use actual API or dummy response
         verbose: Whether to print detailed output
+        log_to_wandb: Whether to log metrics to W&B
     
     Returns:
         Tuple of (is_correct, solution, metrics)
     """
-    # Get model's solution
-    solution = solve_puzzle(words, use_api=use_api)
+    # Get solver and solve puzzle
+    solver = get_solver(solver_name)
+    solution = solver.solve(words, use_api=use_api, model=model)
     
     # Extract just the word groups from structured output
     predicted_groups = [group.words for group in solution.groups]
@@ -156,7 +162,7 @@ def score_single_puzzle(words: List[str], ground_truth: List[List[str]], use_api
     return is_correct, solution, metrics
 
 
-def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbose: bool = False, 
+def score_dataset(filepath: str, solver_name: str = "baseline", model: str = "gpt-4o-mini", use_api: bool = True, limit: int = None, verbose: bool = False, 
                  wandb_config: Optional[Dict[str, Any]] = None, experiment_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Score model performance on entire dataset.
@@ -219,7 +225,9 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
             print(f"Example {i+1}/{len(examples)}")
         
         is_correct, solution, metrics = score_single_puzzle(
-            words, ground_truth, 
+            words, ground_truth,
+            solver_name=solver_name,
+            model=model,
             use_api=use_api, 
             verbose=verbose,
             log_to_wandb=(wandb_config is not None)
@@ -294,21 +302,63 @@ def score_dataset(filepath: str, use_api: bool = True, limit: int = None, verbos
     }
 
 
+def show_experiment_history(n: int = 10) -> None:
+    """Display recent experiment results in a clean table."""
+    history_file = "experiments.csv"
+    if not os.path.exists(history_file):
+        print("No experiment history found. Run some experiments first!")
+        return
+    
+    with open(history_file, 'r') as f:
+        reader = csv.DictReader(f)
+        experiments = list(reader)
+    
+    if not experiments:
+        return
+    
+    # Take last n experiments
+    recent = experiments[-n:] if len(experiments) > n else experiments
+    
+    print("\n" + "="*85)
+    print(f"📊 EXPERIMENT HISTORY (last {len(recent)} runs)")
+    print("="*85)
+    print(f"{'Date':<12} {'Solver':<10} {'Model':<12} {'Total%':<9} {'Group%':<9} {'Correct':<10}")
+    print("-"*85)
+    
+    for exp in recent:
+        date = datetime.fromisoformat(exp['timestamp']).strftime("%m/%d %H:%M")
+        print(f"{date:<12} {exp['solver']:<10} {exp['model']:<12} "
+              f"{float(exp['total_acc']):<8.1f}% {float(exp['group_acc']):<8.1f}% "
+              f"{exp['correct']}/{exp['total']:<8}")
+    print("="*85)
+
+
 def main():
     """Main function to run scoring on test set."""
     parser = argparse.ArgumentParser(description="Score NYT Connections puzzle solver")
-    parser.add_argument("test_file", type=str, help="Path to test JSONL file")
+    parser.add_argument("test_file", type=str, nargs='?', default="examples_test.jsonl", 
+                       help="Path to test JSONL file (default: examples_test.jsonl)")
+    parser.add_argument("--compare", action="store_true", help="Show experiment history and exit")
     parser.add_argument("--use-api", action="store_true", help="Use actual API calls (default: dummy mode)")
     parser.add_argument("--limit", type=int, help="Limit number of examples to score")
     parser.add_argument("--verbose", action="store_true", help="Print detailed output for each example")
     parser.add_argument("--no-save", action="store_true", help="Don't save results to file")
     parser.add_argument("--output", type=str, help="Custom output file path (default: results_<timestamp>.json)")
-    parser.add_argument("--wandb", action="store_true", help="Log results to Weights & Biases")
+    parser.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging")
     parser.add_argument("--experiment-name", type=str, help="Name for the W&B experiment")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="Model name for tracking")
-    parser.add_argument("--solver-type", type=str, default="single-call", help="Type of solver strategy")
+    parser.add_argument("--model", type=str, default="gpt-4o-mini", 
+                       choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+                       help="OpenAI model to use")
+    parser.add_argument("--solver", type=str, default="baseline",
+                       choices=["baseline", "few-shot", "dspy"],
+                       help="Solver to use (baseline, few-shot, or dspy)")
     
     args = parser.parse_args()
+    
+    # If --compare flag, show history and exit
+    if args.compare:
+        show_experiment_history()
+        return 0
     
     # Check if file exists
     if not os.path.exists(args.test_file):
@@ -319,6 +369,8 @@ def main():
     print("NYT CONNECTIONS PUZZLE SOLVER - SELF-GRADING")
     print("="*60)
     print(f"Test file: {args.test_file}")
+    print(f"Solver: {args.solver}")
+    print(f"Model: {args.model}")
     if args.limit:
         print(f"Limiting to first {args.limit} examples")
     print(f"Mode: {'API' if args.use_api else 'DUMMY (no API calls)'}")
@@ -326,10 +378,10 @@ def main():
     
     # Prepare W&B config if requested
     wandb_config = None
-    if args.wandb:
+    if not args.no_wandb:
         wandb_config = {
             "model": args.model,
-            "solver_type": args.solver_type,
+            "solver": args.solver,
             "test_file": os.path.basename(args.test_file),
             "use_api": args.use_api,
             "limit": args.limit,
@@ -337,7 +389,9 @@ def main():
     
     # Run scoring
     results = score_dataset(
-        args.test_file, 
+        args.test_file,
+        solver_name=args.solver,
+        model=args.model,
         use_api=args.use_api,
         limit=args.limit,
         verbose=args.verbose,
@@ -345,52 +399,96 @@ def main():
         experiment_name=args.experiment_name
     )
     
-    # Print summary with better formatting
-    print("\n" + "="*60)
-    print("SELF-GRADING RESULTS")
-    print("="*60)
-    print(f"Total puzzles tested: {results['total_examples']}")
-    print(f"Puzzles solved correctly: {results['correct']}")
-    print(f"Puzzles solved incorrectly: {results['incorrect']}")
-    print("-"*60)
-    print(f"ACCURACY: {results['accuracy']:.2f}%")
+    # Print compact summary with key metrics highlighted
+    print("\n" + "="*70)
+    print("EXPERIMENT RESULTS")
+    print("="*70)
     
-    # Print summary metrics if available
+    # Key metrics prominently displayed
+    group_acc = results['summary_metrics'].get('mean_group_accuracy', 0) * 100 if 'summary_metrics' in results else 0
+    print(f"📊 SOLVER: {args.solver.upper()}  |  MODEL: {args.model}")
+    print(f"📈 TOTAL ACCURACY: {results['accuracy']:.1f}% ({results['correct']}/{results['total_examples']})")
+    print(f"🎯 GROUP ACCURACY: {group_acc:.1f}%")
+    print("-"*70)
+    
+    # Compact detailed metrics in table format
     if 'summary_metrics' in results and results['summary_metrics']:
-        print("-"*60)
         print("DETAILED METRICS:")
-        for key in ['exact_match', 'group_accuracy', 'word_accuracy', 'pairwise_accuracy']:
+        print(f"{'Metric':<20} {'Mean':<8} {'Min':<8} {'Max':<8}")
+        print("-" * 46)
+        
+        metric_display = {
+            'exact_match': 'Perfect Solutions',
+            'group_accuracy': 'Group Accuracy', 
+            'word_accuracy': 'Word Accuracy',
+            'pairwise_accuracy': 'Pairwise Accuracy'
+        }
+        
+        for key, display_name in metric_display.items():
             mean_key = f"mean_{key}"
             if mean_key in results['summary_metrics']:
                 mean_val = results['summary_metrics'][mean_key]
                 min_val = results['summary_metrics'][f"min_{key}"]
                 max_val = results['summary_metrics'][f"max_{key}"]
-                print(f"  {key}: mean={mean_val:.3f}, min={min_val:.3f}, max={max_val:.3f}")
+                print(f"{display_name:<20} {mean_val:.3f}    {min_val:.3f}    {max_val:.3f}")
+        
         if 'mean_is_two_word_swap' in results['summary_metrics']:
-            print(f"  Two-word swap rate: {results['summary_metrics']['mean_is_two_word_swap']:.3f}")
-    print("="*60)
+            swap_rate = results['summary_metrics']['mean_is_two_word_swap']
+            print(f"{'Two-word Swaps':<20} {swap_rate:.3f}    -        -")
     
-    # Save results automatically unless --no-save
+    print("="*70)
+    
+    # Save results
     if not args.no_save:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         # Generate filename with timestamp if not specified
         if args.output:
             output_file = args.output
         else:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"results_{timestamp}.json"
+            output_file = f"results_{args.solver}_{args.model}_{timestamp}.json"
         
         # Add metadata to results
         results["metadata"] = {
+            "solver": args.solver,
+            "model": args.model,
             "test_file": args.test_file,
             "timestamp": datetime.now().isoformat(),
             "mode": "api" if args.use_api else "dummy",
             "limit": args.limit
         }
         
+        # Save detailed results
         with open(output_file, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"\nDetailed results saved to: {output_file}")
+        print(f"\n💾 Results saved: {output_file}")
+        
+        # Update experiment history CSV
+        history_file = "experiments.csv"
+        file_exists = os.path.exists(history_file)
+        
+        with open(history_file, 'a', newline='') as f:
+            fieldnames = ['timestamp', 'solver', 'model', 'total_acc', 'group_acc', 
+                         'correct', 'total', 'test_file', 'mode']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow({
+                'timestamp': datetime.now().isoformat(),
+                'solver': args.solver,
+                'model': args.model,
+                'total_acc': results['accuracy'],
+                'group_acc': group_acc,
+                'correct': results['correct'],
+                'total': results['total_examples'],
+                'test_file': os.path.basename(args.test_file),
+                'mode': 'api' if args.use_api else 'dummy'
+            })
+        
+        print(f"📊 Updated experiment history: {history_file}")
     
     # Return exit code based on success (useful for CI/CD)
     return 0 if results['accuracy'] > 0 else 1

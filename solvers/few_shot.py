@@ -1,34 +1,27 @@
 from typing import List, Dict, Any, Optional
-import json
 from .base import BaseSolver
 
 
 class FewShotSolver(BaseSolver):
-    """Few-shot solver that includes examples in the prompt."""
+    """Few-shot solver that includes examples in the prompt.
     
-    def __init__(self, examples_file: str = "examples_test.jsonl", num_examples: int = 3):
+    This is the NAIVE few-shot approach that simply includes a fixed number
+    of examples directly in the prompt without any optimization or dynamic selection.
+    Compare with DSPySolver which uses optimized example selection.
+    """
+    
+    def __init__(self, examples: Optional[List[Dict[str, Any]]] = None, num_examples: int = 3):
         """
         Initialize the few-shot solver.
         
         Args:
-            examples_file: Path to JSONL file with examples
+            examples: List of example puzzles with solutions
             num_examples: Number of examples to include in prompt
         """
         super().__init__()
-        self.examples_file = examples_file
+        self.examples = examples or []
         self.num_examples = num_examples
-        self.examples = self._load_examples()
     
-    def _load_examples(self) -> List[Dict[str, Any]]:
-        """Load examples from JSONL file."""
-        examples = []
-        try:
-            with open(self.examples_file, 'r') as f:
-                for line in f:
-                    examples.append(json.loads(line))
-        except FileNotFoundError:
-            print(f"Warning: Examples file {self.examples_file} not found. Using no examples.")
-        return examples
     
     def _format_example(self, example: Dict[str, Any]) -> str:
         """Format a single example for the prompt."""
@@ -43,7 +36,7 @@ class FewShotSolver(BaseSolver):
         
         return formatted
     
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, current_words: Optional[List[str]] = None) -> str:
         """Get the system prompt with examples for the few-shot solver."""
         base_prompt = """You are an expert at solving NYT Connections puzzles. 
         Given 16 words, you need to group them into 4 groups of 4 words each.
@@ -59,9 +52,16 @@ class FewShotSolver(BaseSolver):
         Learn from the following examples to understand the patterns and reasoning:
         """
         
-        # Add examples if available
+        # Add examples if available (excluding current puzzle to avoid leakage)
         if self.examples and self.num_examples > 0:
-            examples_to_use = self.examples[:min(self.num_examples, len(self.examples))]
+            # Filter out the current puzzle if words are provided
+            available_examples = self.examples
+            if current_words:
+                current_set = set(current_words)
+                available_examples = [ex for ex in self.examples 
+                                     if set(ex.get('words', [])) != current_set]
+            
+            examples_to_use = available_examples[:min(self.num_examples, len(available_examples))]
             base_prompt += "\n\n" + "="*50 + "\n"
             for i, example in enumerate(examples_to_use, 1):
                 base_prompt += f"\nExample {i}:\n"

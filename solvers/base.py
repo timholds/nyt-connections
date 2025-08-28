@@ -22,8 +22,12 @@ class BaseSolver(ABC):
         self.client = None
     
     @abstractmethod
-    def get_system_prompt(self) -> str:
-        """Get the system prompt for this solver."""
+    def get_system_prompt(self, current_words: Optional[List[str]] = None) -> str:
+        """Get the system prompt for this solver.
+        
+        Args:
+            current_words: Optional current puzzle words to exclude from examples
+        """
         pass
     
     @abstractmethod
@@ -85,7 +89,7 @@ class BaseSolver(ABC):
             raise ValueError("All 16 words must be unique")
         
         # Get prompts from the specific solver implementation
-        system_prompt = self.get_system_prompt()
+        system_prompt = self.get_system_prompt(current_words=words)
         user_message = self.get_user_message(words)
         
         if use_api:

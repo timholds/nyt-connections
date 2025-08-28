@@ -71,8 +71,9 @@ def main():
     examples_to_process = examples[:args.limit]
     print(f"Processing {len(examples_to_process)} example(s) (--limit={args.limit})")
     
-    # Get the solver instance once
-    solver = get_solver(args.solver)
+    # Get the solver instance once, passing all examples for few-shot/dspy solvers
+    # They can use these examples for learning (excluding the current test example)
+    solver = get_solver(args.solver, examples=examples)
     
     # Track overall statistics
     correct_count = 0
