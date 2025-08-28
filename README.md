@@ -32,6 +32,10 @@ export OPENAI_API_KEY='your-key-here'
 python get_embeddings.py
 ```
 
+## LLM API Design Choice
+
+The solver uses OpenAI's structured output (`beta.chat.completions.parse`) to ensure reliable, validated responses with reasoning for each group. While this requires models that support structured output (gpt-4o-mini or newer), it guarantees valid JSON responses matching our Pydantic schema and provides meaningful explanations for each grouping. This is crucial for understanding the model's reasoning and debugging incorrect groupings. The cost remains very low with gpt-4o-mini at $0.15/1M input tokens and $0.60/1M output tokens - running on 400 puzzles costs less than $0.20 total.
+
 ## Files
 
 - `examples.jsonl` - 399 puzzle examples with solutions

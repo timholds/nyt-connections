@@ -1,0 +1,7 @@
+NYT Connections groups words in these common patterns:
+
+WORD PATTERNS: Fill-in-the-blank (e.g., '___ cake', '___ ball')
+CATEGORIES: Animals, colors, foods, sports teams, body parts
+WORDPLAY: Palindromes, homophones, rhymes, anagrams, compound words
+ASSOCIATIONS: Movie titles, song lyrics, idioms, phrases
+PROPERTIES: Things that are round, things that fly, things that are red
