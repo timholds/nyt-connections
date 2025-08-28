@@ -73,25 +73,20 @@ class ConnectionsSolver(dspy.Module):
 
 
 class DSPySolver(BaseSolver):
-    """DSPy-based solver using few-shot learning and chain of thought."""
+    """DSPy-based solver using OPTIMIZED few-shot learning and chain of thought.
     
-    def __init__(self):
+    This solver uses DSPy's capabilities for:
+    - Dynamic example selection based on similarity
+    - Chain-of-thought reasoning
+    - Potential for example optimization (vs naive static examples in FewShotSolver)
+    """
+    
+    def __init__(self, examples: Optional[List[Dict[str, Any]]] = None):
         super().__init__()
-        self.examples = None
+        self.examples = examples or []
         self.dspy_solver = None
         self.lm = None
         
-    def load_examples(self, filepath: str = "examples.jsonl") -> List[Dict[str, Any]]:
-        """Load training examples for few-shot learning."""
-        if not os.path.exists(filepath):
-            print(f"Warning: {filepath} not found. Will use without examples.")
-            return []
-        
-        examples = []
-        with open(filepath, 'r') as f:
-            for line in f:
-                examples.append(json.loads(line))
-        return examples
     
     def get_similar_examples(self, words: List[str], n: int = 3) -> List[Dict]:
         """Get n most similar examples based on word/theme patterns."""
@@ -130,6 +125,7 @@ class DSPySolver(BaseSolver):
         
         # Get top n examples
         scores.sort(key=lambda x: x[0], reverse=True)
+        # Filter out exact matches (score = -100) to avoid giving away answers
         return [ex for score, ex in scores[:n] if score > -100]
     
     def format_dspy_example(self, example: Dict) -> dspy.Example:
@@ -178,7 +174,7 @@ class DSPySolver(BaseSolver):
             group4_reason=groups[3]['reason']
         ).with_inputs('words')
     
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, current_words: Optional[List[str]] = None) -> str:
         """Get the system prompt for DSPy (not used directly but kept for compatibility)."""
         return "You are an expert at solving NYT Connections puzzles."
     
@@ -220,11 +216,9 @@ class DSPySolver(BaseSolver):
                 )
                 dspy.settings.configure(lm=self.lm)
             
-            # Load examples if not already loaded
-            if self.examples is None:
-                self.examples = self.load_examples("examples.jsonl")
-                if self.examples:
-                    print(f"Loaded {len(self.examples)} training examples")
+            # Use provided examples
+            if self.examples:
+                print(f"Using {len(self.examples)} training examples")
             
             # Initialize solver if needed
             if not self.dspy_solver:

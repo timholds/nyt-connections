@@ -60,11 +60,29 @@ The scoring system (`score.py`) implements comprehensive metrics to understand m
 
 These metrics help distinguish systematic errors from random failures and guide improvements - for example, high pairwise accuracy with low exact match suggests the model understands relationships but struggles with precise boundaries between similar categories.
 
+## Solver Architecture
+
+The system includes a modular solver architecture in the `solvers/` folder:
+- `base.py` - Abstract base class all solvers inherit from
+- `models.py` - Shared Pydantic models for structured outputs
+- `baseline.py` - Simple baseline solver
+- `few_shot.py` - Few-shot solver that includes examples in the prompt
+- `dspy_solver.py` - DSPy-based solver with optimized example selection
+- `multi_stage_solver.py` - Multi-stage solver (if available)
+
+### Solver Approaches
+
+- **BaselineSolver**: Simplest approach with just a well-crafted prompt
+- **FewShotSolver**: Uses simple, static examples directly in the prompt (naive approach)
+- **DSPySolver**: Uses DSPy's optimization capabilities to dynamically select and potentially optimize examples
+
+Use `--solver baseline`, `--solver few-shot`, `--solver dspy`, or `--solver multi-stage` when running `solve.py`.
+
 ## Files
 
 - `examples.jsonl` - 399 puzzle examples with solutions
 - `get_embeddings.py` - Fetches embeddings from OpenAI (includes both words and themes)
 - `embedding_store.py` - Optimized storage class for fast lookups
 - `embedding_utils.py` - Utility functions for similarity and clustering
-- `solve.py` - Main solver implementation
+- `solve.py` - Main solver implementation with pluggable solvers
 - `score.py` - Comprehensive scoring system with detailed metrics

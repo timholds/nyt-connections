@@ -56,7 +56,7 @@ def main():
                         choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
                         help="OpenAI model to use (default: gpt-4o-mini)")
     parser.add_argument("--solver", type=str, default="baseline",
-                        choices=["baseline", "few-shot", "dspy"],
+                        choices=["baseline", "few-shot", "dspy", "multi-stage", "hungarian", "constraint"],
                         help="Solver to use (default: baseline)")
     parser.add_argument("--limit", type=int, default=1,
                         help="Number of examples to process (default: 1)")
