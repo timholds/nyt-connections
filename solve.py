@@ -1,5 +1,8 @@
 import json
 import argparse
+import csv
+import os
+from datetime import datetime
 from typing import List, Dict, Any
 from solvers import get_solver
 from solvers.models import PuzzleSolution
@@ -20,26 +23,35 @@ def extract_words(example: Dict[str, Any]) -> List[str]:
 
 
 
-def check_solution_correctness(predicted_solution: PuzzleSolution, ground_truth: Dict[str, Any]) -> bool:
+def check_solution_correctness(predicted_solution: PuzzleSolution, ground_truth: Dict[str, Any]) -> tuple[bool, float]:
     """
-    Check if predicted solution matches ground truth.
+    Check if predicted solution matches ground truth and calculate group accuracy.
     
     Args:
         predicted_solution: PuzzleSolution from model
         ground_truth: Ground truth from dataset
     
     Returns:
-        True if correct, False otherwise
+        Tuple of (is_correct, group_accuracy)
     """
     # Extract groups from both
     predicted_groups = [group.words for group in predicted_solution.groups]
     actual_groups = [group['words'] for group in ground_truth['groups']]
     
-    # Normalize to sets of frozensets for comparison
+    # Normalize to sets for comparison
+    pred_sets = [set(group) for group in predicted_groups]
+    actual_sets = [set(group) for group in actual_groups]
+    
+    # Calculate group accuracy
+    correct_groups = sum(1 for p in pred_sets if p in actual_sets)
+    group_accuracy = correct_groups / 4
+    
+    # Check if completely correct
     pred_normalized = {frozenset(group) for group in predicted_groups}
     actual_normalized = {frozenset(group) for group in actual_groups}
+    is_correct = pred_normalized == actual_normalized
     
-    return pred_normalized == actual_normalized
+    return is_correct, group_accuracy
 
 
 def main():

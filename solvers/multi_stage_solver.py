@@ -257,8 +257,92 @@ class MultiStageSolver(BaseSolver):
             words_str = ", ".join(words)
             
             try:
-                # Execute multi-stage pipeline
-                pred = self.solver(words=words_str)
+                # Execute first 3 stages of pipeline
+                print("\n🔍 Stage 1: Theme Analysis")
+                theme_analysis = self.solver.analyze(words=words_str)
+                
+                print("\n💡 Stage 2: Hypothesis Generation")
+                hypotheses = self.solver.generate_hypotheses(
+                    words=words_str,
+                    theme_analysis=f"""
+                    Literal themes: {theme_analysis.literal_themes}
+                    Wordplay: {theme_analysis.wordplay_patterns}
+                    Phrases: {theme_analysis.phrase_patterns}
+                    Cultural: {theme_analysis.cultural_references}
+                    Summary: {theme_analysis.analysis_summary}
+                    """
+                )
+                
+                # Format candidate groups for validation
+                candidate_groups = []
+                for i in range(1, 6):  # We generate 5 hypotheses
+                    group = getattr(hypotheses, f"hypothesis{i}", "")
+                    reason = getattr(hypotheses, f"hypothesis{i}_reason", "")
+                    if group:
+                        candidate_groups.append(f"Group {i}: {group} (Reason: {reason})")
+                
+                print("\n✅ Stage 3: Validation")
+                validation = self.solver.validate(
+                    all_words=words_str,
+                    candidate_groups="\n".join(candidate_groups)
+                )
+                
+                # Refinement stage with retry logic
+                print("\n🎯 Stage 4: Refinement")
+                max_refinement_retries = 3
+                best_solution = None
+                
+                for attempt in range(max_refinement_retries):
+                    # Add stronger guidance on retry
+                    validation_feedback = f"""
+                    Conflicts: {validation.conflicts}
+                    Missing words: {validation.missing_words}
+                    Quality: {validation.group_quality}
+                    Result: {validation.validation_result}
+                    """
+                    
+                    if attempt > 0:
+                        validation_feedback += f"\n\nATTEMPT {attempt + 1}: Previous refinement failed validation. "
+                        validation_feedback += "CRITICAL: Each group must have EXACTLY 4 words, all 16 words must be used exactly once."
+                    
+                    final_solution = self.solver.refine(
+                        words=words_str,
+                        candidate_groups="\n".join(candidate_groups),
+                        validation_result=validation_feedback
+                    )
+                    
+                    # Validate the refined solution
+                    validation_issues = []
+                    all_words_used = []
+                    
+                    for i in range(1, 5):
+                        group_words = getattr(final_solution, f"final_group{i}", "")
+                        words_list = [w.strip() for w in group_words.split(",") if w.strip()]
+                        
+                        if len(words_list) != 4:
+                            validation_issues.append(f"Group {i} has {len(words_list)} words")
+                        
+                        all_words_used.extend(words_list)
+                    
+                    # Check for issues
+                    if len(all_words_used) != len(set(all_words_used)):
+                        duplicates = [w for w in set(all_words_used) if all_words_used.count(w) > 1]
+                        validation_issues.append(f"Duplicates: {duplicates}")
+                    
+                    if len(set(all_words_used)) != 16:
+                        validation_issues.append(f"Only {len(set(all_words_used))}/16 words used")
+                    
+                    if not validation_issues:
+                        best_solution = final_solution
+                        break
+                    elif attempt < max_refinement_retries - 1:
+                        print(f"  Refinement attempt {attempt + 1} had issues: {validation_issues}")
+                        print("  Retrying refinement stage...")
+                    else:
+                        print(f"  Warning: Using solution with issues after {max_refinement_retries} refinement attempts")
+                        best_solution = final_solution
+                
+                pred = best_solution
                 
                 # Parse the final refined output
                 groups = []

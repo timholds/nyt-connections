@@ -246,31 +246,68 @@ class DSPySolver(BaseSolver):
                 # Try to solve with retries
                 max_retries = 3
                 best_pred = None
+                validation_issues = []
                 
                 for attempt in range(max_retries):
                     try:
+                        # Add retry feedback if we had validation issues
+                        if attempt > 0 and validation_issues:
+                            # Temporarily modify the prompt with feedback
+                            original_demos = self.dspy_solver.generate.demos
+                            retry_feedback = dspy.Example(
+                                words=words_str,
+                                reasoning=f"IMPORTANT: Previous attempt had issues: {', '.join(validation_issues)}. Ensure each group has EXACTLY 4 words and all 16 words are used exactly once.",
+                                group1_words="", group1_reason="",
+                                group2_words="", group2_reason="",
+                                group3_words="", group3_reason="",
+                                group4_words="", group4_reason=""
+                            ).with_inputs('words', 'reasoning')
+                            
+                            # Add feedback as a demo temporarily
+                            self.dspy_solver.generate.demos = [retry_feedback] + (original_demos or [])
+                        
                         pred = self.dspy_solver(words=words_str)
                         
-                        # Check if all groups have 4 words
-                        all_valid = True
+                        # Validate the prediction
+                        validation_issues = []
+                        all_words_used = []
+                        
                         for i in range(1, 5):
                             group_words = getattr(pred, f"group{i}_words", "")
-                            if len([w.strip() for w in group_words.split(",")]) != 4:
-                                all_valid = False
-                                break
+                            words_list = [w.strip() for w in group_words.split(",") if w.strip()]
+                            
+                            if len(words_list) != 4:
+                                validation_issues.append(f"Group {i} has {len(words_list)} words instead of 4")
+                            
+                            all_words_used.extend(words_list)
                         
-                        if all_valid or attempt == max_retries - 1:
+                        # Check for duplicates
+                        if len(all_words_used) != len(set(all_words_used)):
+                            duplicates = [w for w in set(all_words_used) if all_words_used.count(w) > 1]
+                            validation_issues.append(f"Duplicate words: {duplicates}")
+                        
+                        # Check if all 16 words are used
+                        if len(set(all_words_used)) != 16:
+                            validation_issues.append(f"Used {len(set(all_words_used))}/16 unique words")
+                        
+                        if not validation_issues or attempt == max_retries - 1:
                             best_pred = pred
+                            if validation_issues:
+                                print(f"Warning: Using solution with issues after {max_retries} attempts")
                             break
                         else:
-                            print(f"Attempt {attempt + 1} had invalid groups, retrying...")
-                            # Adjust temperature for retry
-                            self.lm.kwargs['temperature'] = min(1.0, self.lm.kwargs['temperature'] + 0.1)
+                            print(f"Attempt {attempt + 1}/{max_retries} validation issues: {validation_issues}")
+                            # Adjust temperature slightly for variety
+                            self.lm.kwargs['temperature'] = min(0.9, self.lm.kwargs.get('temperature', 0.7) + 0.05)
                             
                     except Exception as e:
-                        print(f"Attempt {attempt + 1} failed: {e}")
+                        print(f"Attempt {attempt + 1} failed with error: {e}")
                         if attempt == max_retries - 1:
                             raise
+                    finally:
+                        # Restore original demos if we modified them
+                        if attempt > 0 and validation_issues:
+                            self.dspy_solver.generate.demos = original_demos
                 
                 pred = best_pred
                 

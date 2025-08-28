@@ -29,6 +29,10 @@ def check_spending():
             if line.startswith("TOTAL:"):
                 total_cost = float(line.split('$')[1])
     
+    # Add the last entry if it exists (file might not end with separator)
+    if current_entry:
+        entries.append(current_entry)
+    
     # Print summary
     print("=" * 60)
     print("OpenAI API Spending Summary")

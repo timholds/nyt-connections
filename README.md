@@ -75,8 +75,24 @@ The system includes a modular solver architecture in the `solvers/` folder:
 - **BaselineSolver**: Simplest approach with just a well-crafted prompt
 - **FewShotSolver**: Uses simple, static examples directly in the prompt (naive approach)
 - **DSPySolver**: Uses DSPy's optimization capabilities to dynamically select and potentially optimize examples
+- **MultiStageSolver**: Four-stage reasoning pipeline (theme analysis → hypothesis generation → validation → refinement) for systematic solving
 
 Use `--solver baseline`, `--solver few-shot`, `--solver dspy`, or `--solver multi-stage` when running `solve.py`.
+
+### DSPy Prompt Optimization
+
+The DSPy solvers can be optimized using MIPRO (Multi-Prompt Instruction Proposal Optimizer) to automatically learn better prompts from examples. This optimization:
+- Learns optimal field descriptions for the signature (what to ask for in each output field)
+- Optimizes the chain-of-thought reasoning template
+- Selects the best few-shot examples for in-context learning
+- Runs once and saves artifacts that can be reused across all DSPy-based solvers
+
+Run `python optimize_once.py` to perform optimization (costs ~$1-2 in API calls). This creates:
+- `optimized_solver.json` - Complete optimized module
+- `optimized_prompts.json` - Optimized field descriptions to apply to any DSPy signature
+- `optimized_demos.json` - Best few-shot examples selected by MIPRO
+
+The optimization metric is order-independent: it doesn't care about word order within groups or group order between predictions.
 
 ## Files
 

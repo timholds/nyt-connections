@@ -187,7 +187,7 @@ def score_dataset(filepath: str, solver_name: str = "baseline", model: str = "gp
     
     # Initialize W&B if config provided
     if wandb_config:
-        run_name = experiment_name or f"solver_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        run_name = experiment_name or f"{solver_name}_{model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         wandb.init(
             project="nyt-connections",
             name=run_name,
@@ -218,7 +218,7 @@ def score_dataset(filepath: str, solver_name: str = "baseline", model: str = "gp
     
     for i, example in enumerate(examples):
         words = example["words"]
-        ground_truth = example["solution"]["groups"]
+        ground_truth = [group["words"] for group in example["solution"]["groups"]]
         
         if verbose:
             print(f"\n{'='*60}")
@@ -245,7 +245,8 @@ def score_dataset(filepath: str, solver_name: str = "baseline", model: str = "gp
             "example_id": i,
             "correct": is_correct,
             "predicted": [group.model_dump() for group in solution.groups],
-            "actual": ground_truth,
+            "actual": [{"words": group, "reason": example["solution"]["groups"][j]["reason"]} 
+                      for j, group in enumerate(ground_truth)],
             "metrics": metrics
         })
         
@@ -350,8 +351,8 @@ def main():
                        choices=["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
                        help="OpenAI model to use")
     parser.add_argument("--solver", type=str, default="baseline",
-                       choices=["baseline", "few-shot", "dspy"],
-                       help="Solver to use (baseline, few-shot, or dspy)")
+                       choices=["baseline", "few-shot", "dspy", "multi-stage", "hungarian", "constraint"],
+                       help="Solver to use (baseline, few-shot, dspy, multi-stage, hungarian, or constraint)")
     
     args = parser.parse_args()
     

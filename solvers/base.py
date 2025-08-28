@@ -9,10 +9,10 @@ from .models import GroupSolution, PuzzleSolution
 class BaseSolver(ABC):
     """Base class for all Connections puzzle solvers."""
     
-    # Model pricing as of 2024 (per 1M tokens)
+    # Model pricing as of 2025 (per 1M tokens)
     MODEL_PRICING = {
         "gpt-4o-mini": {"input": 0.150, "output": 0.600},
-        "gpt-4o": {"input": 2.50, "output": 10.00},
+        "gpt-4o": {"input": 3.00, "output": 10.00},
         "gpt-4-turbo": {"input": 10.00, "output": 30.00},
         "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},  # Doesn't support structured output
     }
@@ -169,9 +169,7 @@ class BaseSolver(ABC):
             
             # Log the cost
             self.log_api_cost(model, prompt_tokens, completion_tokens, total_cost)
-            
-            print(f"\nAPI Cost: ${total_cost:.4f} ({prompt_tokens} prompt + {completion_tokens} completion tokens)")
-            
+                        
         else:
             # Print what would be sent to the LLM (dummy call for testing)
             print("=" * 80)

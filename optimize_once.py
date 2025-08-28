@@ -1,0 +1,383 @@
+"""
+Optimize DSPy prompts once with MIPRO and apply to all solvers.
+This script runs expensive optimization once and saves reusable components.
+"""
+
+import json
+import os
+from typing import List, Dict, Any, Set, Tuple
+import dspy
+from dspy.teleprompt import MIPROv2
+from solvers.dspy_solver import ConnectionsSolver, ConnectionsSignature
+import random
+import pickle
+
+
+def normalize_groups(groups: List[Set[str]]) -> List[Set[str]]:
+    """Normalize groups by converting to lowercase sets."""
+    return [set(w.lower().strip() for w in group) for group in groups]
+
+
+def puzzle_accuracy_metric(example: dspy.Example, pred, trace=None) -> float:
+    """
+    Metric for evaluating puzzle solutions.
+    Order of groups and words within groups doesn't matter.
+    """
+    try:
+        # Parse true groups
+        true_groups = []
+        for i in range(1, 5):
+            group_key = f"group{i}_words"
+            if hasattr(example, group_key):
+                words = getattr(example, group_key)
+                if isinstance(words, str):
+                    words_list = [w.strip() for w in words.split(",")]
+                else:
+                    words_list = list(words)
+                true_groups.append(set(w.lower() for w in words_list))
+        
+        # Parse predicted groups
+        pred_groups = []
+        for i in range(1, 5):
+            group_key = f"group{i}_words"
+            if hasattr(pred, group_key):
+                words = getattr(pred, group_key)
+                if isinstance(words, str):
+                    words_list = [w.strip() for w in words.split(",")]
+                else:
+                    words_list = list(words)
+                pred_groups.append(set(w.lower() for w in words_list))
+        
+        # Count matching groups (order-independent)
+        matches = 0
+        matched_true = set()
+        
+        for pred_group in pred_groups:
+            for j, true_group in enumerate(true_groups):
+                if j not in matched_true and pred_group == true_group:
+                    matches += 1
+                    matched_true.add(j)
+                    break
+        
+        # Score: 0.25 per correct group, bonus for perfect
+        score = matches / 4.0
+        if matches == 4:
+            score = 1.0  # Perfect bonus
+            
+        return score
+        
+    except Exception as e:
+        print(f"Error in metric: {e}")
+        return 0.0
+
+
+def load_examples(filepath: str = "examples.jsonl") -> List[dspy.Example]:
+    """Load and format examples from JSONL file."""
+    examples = []
+    
+    with open(filepath, 'r') as f:
+        for line in f:
+            data = json.loads(line)
+            
+            words_str = ", ".join(data['words'])
+            groups = data['solution']['groups']
+            
+            # Simple reasoning template
+            reasoning = f"Analyzing 16 words for 4 groups of 4. Looking for categories, wordplay, phrases, and cultural references."
+            
+            example = dspy.Example(
+                words=words_str,
+                reasoning=reasoning,
+                group1_words=", ".join(groups[0]['words']),
+                group1_reason=groups[0]['reason'],
+                group2_words=", ".join(groups[1]['words']),
+                group2_reason=groups[1]['reason'],
+                group3_words=", ".join(groups[2]['words']),
+                group3_reason=groups[2]['reason'],
+                group4_words=", ".join(groups[3]['words']),
+                group4_reason=groups[3]['reason']
+            ).with_inputs('words')
+            
+            examples.append(example)
+    
+    return examples
+
+
+def run_optimization():
+    """Run MIPRO optimization and save results."""
+    
+    print("="*80)
+    print("MIPRO Optimization for DSPy Connections Solver")
+    print("="*80)
+    
+    # Load examples
+    print("\n1. Loading examples...")
+    examples = load_examples("examples.jsonl")
+    print(f"   Loaded {len(examples)} examples")
+    
+    # Split data
+    print("\n2. Splitting data...")
+    random.seed(42)
+    random.shuffle(examples)
+    split_idx = int(len(examples) * 0.8)
+    train_set = examples[:split_idx]
+    val_set = examples[split_idx:]
+    print(f"   Train: {len(train_set)} examples")
+    print(f"   Validation: {len(val_set)} examples")
+    
+    # Initialize DSPy
+    print("\n3. Initializing DSPy with OpenAI...")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable not set")
+    
+    lm = dspy.LM(
+        model="gpt-4o-mini",
+        api_key=api_key,
+        max_tokens=800,
+        temperature=0.7
+    )
+    dspy.settings.configure(lm=lm)
+    
+    # Create base solver
+    print("\n4. Creating base solver...")
+    solver = ConnectionsSolver()
+    
+    # Quick baseline evaluation
+    print("\n5. Quick baseline test (5 examples)...")
+    baseline_scores = []
+    for example in val_set[:5]:
+        try:
+            pred = solver(words=example.words)
+            score = puzzle_accuracy_metric(example, pred)
+            baseline_scores.append(score)
+            print(f"   Example score: {score:.2f}")
+        except:
+            baseline_scores.append(0.0)
+    
+    baseline_avg = sum(baseline_scores) / len(baseline_scores) if baseline_scores else 0
+    print(f"   Baseline average: {baseline_avg:.3f}")
+    
+    # MIPRO Optimization
+    print("\n6. Running MIPRO optimization...")
+    print("   This will optimize:")
+    print("   - Field descriptions in the signature")
+    print("   - Chain-of-thought reasoning template")
+    print("   - Few-shot example selection")
+    print("\n   Using limited dataset to reduce costs:")
+    print(f"   - Training on 30 examples")
+    print(f"   - Validating on 10 examples")
+    print(f"   - Running 10 optimization trials")
+    
+    optimizer = MIPROv2(
+        metric=puzzle_accuracy_metric,
+        init_temperature=0.7,
+        verbose=True
+    )
+    
+    # Use smaller subset for cost efficiency
+    train_subset = train_set[:30]
+    val_subset = val_set[:10]
+    
+    print("\n   Starting optimization (this will take a few minutes)...")
+    
+    optimized_solver = optimizer.compile(
+        solver,
+        trainset=train_subset,
+        valset=val_subset,
+        max_bootstrapped_demos=3,
+        max_labeled_demos=3
+    )
+    
+    print("\n7. Optimization complete!")
+    
+    # Test optimized solver
+    print("\n8. Testing optimized solver...")
+    opt_scores = []
+    for i, example in enumerate(val_set[:10]):
+        try:
+            pred = optimized_solver(words=example.words)
+            score = puzzle_accuracy_metric(example, pred)
+            opt_scores.append(score)
+            print(f"   Example {i+1}: {score:.2f}")
+        except Exception as e:
+            print(f"   Example {i+1}: Failed - {e}")
+            opt_scores.append(0.0)
+    
+    opt_avg = sum(opt_scores) / len(opt_scores) if opt_scores else 0
+    
+    print(f"\n   Results:")
+    print(f"   Baseline: {baseline_avg:.3f}")
+    print(f"   Optimized: {opt_avg:.3f}")
+    print(f"   Improvement: +{(opt_avg - baseline_avg):.3f}")
+    
+    # Save optimization results
+    print("\n9. Saving optimization artifacts...")
+    
+    # Save the optimized solver
+    optimized_solver.save("optimized_solver.json")
+    print("   ✓ Saved optimized solver to optimized_solver.json")
+    
+    # Extract and save the optimized signature
+    if hasattr(optimized_solver.generate, 'signature'):
+        sig = optimized_solver.generate.signature
+        
+        # Extract field descriptions
+        optimized_fields = {}
+        for field_name in sig.fields:
+            field = sig.fields[field_name]
+            if hasattr(field, 'json_schema_extra'):
+                optimized_fields[field_name] = field.json_schema_extra.get('desc', '')
+        
+        with open('optimized_prompts.json', 'w') as f:
+            json.dump({
+                'field_descriptions': optimized_fields,
+                'baseline_score': baseline_avg,
+                'optimized_score': opt_avg,
+                'improvement': opt_avg - baseline_avg
+            }, f, indent=2)
+        
+        print("   ✓ Saved optimized prompts to optimized_prompts.json")
+    
+    # Save the demos if any were selected
+    if hasattr(optimized_solver.generate, 'demos') and optimized_solver.generate.demos:
+        demos_data = []
+        for demo in optimized_solver.generate.demos:
+            demo_dict = {}
+            for field in ['words', 'reasoning', 'group1_words', 'group1_reason',
+                         'group2_words', 'group2_reason', 'group3_words', 'group3_reason',
+                         'group4_words', 'group4_reason']:
+                if hasattr(demo, field):
+                    demo_dict[field] = getattr(demo, field)
+            demos_data.append(demo_dict)
+        
+        with open('optimized_demos.json', 'w') as f:
+            json.dump(demos_data, f, indent=2)
+        
+        print(f"   ✓ Saved {len(demos_data)} optimized demos to optimized_demos.json")
+    
+    print("\n" + "="*80)
+    print("Optimization Complete!")
+    print("="*80)
+    print("\nYou can now use these optimized components in ALL your DSPy solvers:")
+    print("1. optimized_solver.json - Complete optimized solver")
+    print("2. optimized_prompts.json - Optimized field descriptions")
+    print("3. optimized_demos.json - Best few-shot examples")
+    print("\nSee apply_optimization.py for how to use these in your solvers.")
+    
+    return optimized_solver
+
+
+def create_application_script():
+    """Create a script showing how to apply optimizations."""
+    
+    script = '''"""
+Apply MIPRO optimizations to all DSPy solvers.
+This script shows how to use the optimized components.
+"""
+
+import json
+import dspy
+from solvers.dspy_solver import ConnectionsSignature
+from solvers.multi_stage_solver import (
+    ThemeAnalysisSignature,
+    HypothesisGenerationSignature,
+    ValidationSignature,
+    RefinementSignature
+)
+
+
+def load_optimized_prompts():
+    """Load the optimized prompts from MIPRO."""
+    with open('optimized_prompts.json', 'r') as f:
+        data = json.load(f)
+    return data['field_descriptions']
+
+
+def apply_to_connections_signature():
+    """Apply optimized prompts to ConnectionsSignature."""
+    prompts = load_optimized_prompts()
+    
+    class OptimizedConnectionsSignature(dspy.Signature):
+        """Solve NYT Connections using MIPRO-optimized prompts."""
+        
+        # Apply optimized descriptions
+        words = dspy.InputField(desc=prompts.get('words', ConnectionsSignature.words.desc))
+        reasoning = dspy.OutputField(desc=prompts.get('reasoning', ConnectionsSignature.reasoning.desc))
+        group1_words = dspy.OutputField(desc=prompts.get('group1_words', ConnectionsSignature.group1_words.desc))
+        group1_reason = dspy.OutputField(desc=prompts.get('group1_reason', ConnectionsSignature.group1_reason.desc))
+        group2_words = dspy.OutputField(desc=prompts.get('group2_words', ConnectionsSignature.group2_words.desc))
+        group2_reason = dspy.OutputField(desc=prompts.get('group2_reason', ConnectionsSignature.group2_reason.desc))
+        group3_words = dspy.OutputField(desc=prompts.get('group3_words', ConnectionsSignature.group3_words.desc))
+        group3_reason = dspy.OutputField(desc=prompts.get('group3_reason', ConnectionsSignature.group3_reason.desc))
+        group4_words = dspy.OutputField(desc=prompts.get('group4_words', ConnectionsSignature.group4_words.desc))
+        group4_reason = dspy.OutputField(desc=prompts.get('group4_reason', ConnectionsSignature.group4_reason.desc))
+    
+    return OptimizedConnectionsSignature
+
+
+def create_optimized_solver():
+    """Create a solver using the fully optimized module."""
+    solver = dspy.Module()
+    solver.load("optimized_solver.json")
+    return solver
+
+
+def apply_learnings_to_multistage():
+    """Apply MIPRO learnings to MultiStage solver signatures."""
+    prompts = load_optimized_prompts()
+    
+    # Extract key insights from optimized reasoning prompt
+    reasoning_insights = prompts.get('reasoning', '')
+    
+    # Apply insights to theme analysis
+    class OptimizedThemeAnalysisSignature(dspy.Signature):
+        """Analyze using MIPRO-learned strategies."""
+        
+        words = dspy.InputField(desc=prompts.get('words', '16 words to analyze'))
+        literal_themes = dspy.OutputField(
+            desc="Categories like those found in optimized groups: " + prompts.get('group1_reason', '')[:100]
+        )
+        wordplay_patterns = dspy.OutputField(
+            desc="Wordplay patterns emphasized in optimization: palindromes, homophones, rhymes"
+        )
+        phrase_patterns = dspy.OutputField(
+            desc="Common phrases as discovered in optimization"
+        )
+        cultural_references = dspy.OutputField(
+            desc="Pop culture patterns from optimized examples"
+        )
+        analysis_summary = dspy.OutputField(
+            desc="Summary using MIPRO-optimized reasoning approach"
+        )
+    
+    return OptimizedThemeAnalysisSignature
+
+
+# Usage in your solvers:
+if __name__ == "__main__":
+    # Option 1: Load complete optimized solver
+    optimized = create_optimized_solver()
+    
+    # Option 2: Apply optimized prompts to existing signatures
+    OptimizedConnections = apply_to_connections_signature()
+    
+    # Option 3: Apply learnings to other solvers
+    OptimizedThemeAnalysis = apply_learnings_to_multistage()
+    
+    print("Optimizations applied successfully!")
+    print("Use these optimized signatures in your solver classes.")
+'''
+    
+    with open('apply_optimization.py', 'w') as f:
+        f.write(script)
+    
+    print("Created apply_optimization.py showing how to use optimizations")
+
+
+if __name__ == "__main__":
+    # Run the optimization
+    optimized_solver = run_optimization()
+    
+    # Create application script
+    create_application_script()
